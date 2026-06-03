@@ -9,7 +9,7 @@
 import FAQ from '../models/FAQ.js';
 import CommunityPost from '../models/CommunityPost.js';
 import { generateEmbedding } from './embeddings.js';
-import { resolveProvider } from './aiProvider.js';
+import { resolveProviderAsync } from './aiProvider.js';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -46,7 +46,7 @@ Output: [{"id": "...", "score": 0.92, "reason": "Both ask about..."}]`;
 // ─── AI call ─────────────────────────────────────────────────────────────────
 
 async function aiChat(userQuestion: string, candidateList: string): Promise<string> {
-  const cfg = resolveProvider();
+  const cfg = await resolveProviderAsync();
 
   const userContent =
     `User question: "${userQuestion.replace(/"/g, "'")}"\n\n` +
@@ -67,9 +67,10 @@ async function aiChat(userQuestion: string, candidateList: string): Promise<stri
     messages,
   };
 
+  const authValue = cfg.provider === 'anthropic' ? cfg.apiKey : `Bearer ${cfg.apiKey}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    [cfg.authHeader]: cfg.apiKey,
+    [cfg.authHeader]: authValue,
   };
   if (cfg.needsAnthropicVersion) {
     headers['anthropic-version'] = '2023-06-01';

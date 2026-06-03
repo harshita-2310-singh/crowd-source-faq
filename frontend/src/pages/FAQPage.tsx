@@ -206,16 +206,28 @@ export default function FAQPage() {
 
   // If user landed on /faq/:id directly, open that FAQ immediately
   useEffect(() => {
-    if (!urlFaqId || !grouped || Object.keys(grouped).length === 0) return;
+    if (!urlFaqId) return;
     // Search all categories for the FAQ with this ID
-    for (const [cat, items] of Object.entries(grouped)) {
-      const found = items.find((item) => item._id === urlFaqId);
-      if (found) {
-        setActiveQuestion({ ...found, category: cat });
-        setActiveCategory(cat);
-        return;
+    if (grouped && Object.keys(grouped).length > 0) {
+      for (const [cat, items] of Object.entries(grouped)) {
+        const found = items.find((item) => item._id === urlFaqId);
+        if (found) {
+          setActiveQuestion({ ...found, category: cat });
+          setActiveCategory(cat);
+          return;
+        }
       }
     }
+    // Not in cache — fetch directly from API
+    api.get(`/faq/${urlFaqId}`)
+      .then((res) => {
+        const faq = res.data;
+        if (faq && faq._id) {
+          setActiveQuestion({ ...faq, category: faq.category || '' });
+          setActiveCategory(faq.category || '');
+        }
+      })
+      .catch(() => { /* FAQ not found or access denied */ });
   }, [urlFaqId, grouped]);
 
   useEffect(() => {
@@ -553,7 +565,7 @@ export default function FAQPage() {
 
       <Footer />
 
-      {searchActive && (
+      {searchActive && searchResults && searchResults.length > 0 && (
         <SearchFeedback searchQuery={searchQuery} resultFaqId={resultFaqId} />
       )}
     </div>

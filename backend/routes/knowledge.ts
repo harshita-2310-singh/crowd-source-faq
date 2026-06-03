@@ -8,6 +8,7 @@ import {
   promoteToFAQ,
   processHighUpvotePosts,
   triggerMeetingProcess,
+  answerFromKnowledgeController,
 } from '../controllers/knowledgeController.js';
 
 const router = Router();
@@ -23,6 +24,9 @@ router.post('/process-upvotes', processHighUpvotePosts);
 
 // POST /api/knowledge/process-meeting/:id — extract knowledge from a specific meeting
 router.post('/process-meeting/:id', triggerMeetingProcess);
+
+// POST /api/knowledge/answer-from-knowledge/:postId — answer a community post from the knowledge base
+router.post('/answer-from-knowledge/:postId', answerFromKnowledgeController);
 
 // PUT /api/knowledge/:id/approve — approve a knowledge entry
 router.put('/:id/approve', approveKnowledge);

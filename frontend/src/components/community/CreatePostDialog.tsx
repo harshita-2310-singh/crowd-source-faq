@@ -2,15 +2,41 @@ import React, { useEffect, useRef, useState } from 'react';
 import Button from '../ui/Button';
 import api from '../../utils/api';
 import type { Post } from '../../types/ui';
+import { useCloudinaryUpload, buildTransformedUrl, type CloudinaryAsset } from '../../hooks/useCloudinaryUpload';
 
 interface CreatePostDialogProps {
   onClose: () => void;
   onCreated: (post: Post, dupResult?: { isDuplicate: boolean; dupCount: number; faqMatches: number }) => void;
+  prefillTitle?: string;
 }
 
-export default function CreatePostDialog({ onClose, onCreated }: CreatePostDialogProps) {
+export default function CreatePostDialog({ onClose, onCreated, prefillTitle = '' }: CreatePostDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const DRAFT_KEY = 'yaksha_post_draft';
+
+  // ── Cloudinary attachments ──
+  const { upload: uploadAttachment, uploading: attaching, error: attachmentError } = useCloudinaryUpload('posts');
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<CloudinaryAsset[]>([]);
+  const MAX_ATTACHMENTS = 4;
+  const handlePickAttachment = () => attachmentInputRef.current?.click();
+  const handleAttachmentFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    for (const file of files) {
+      if (attachments.length >= MAX_ATTACHMENTS) break;
+      try {
+        const asset = await uploadAttachment(file);
+        setAttachments((prev) => [...prev, asset].slice(0, MAX_ATTACHMENTS));
+      } catch {
+        // Error already set on the hook; just stop this batch.
+        break;
+      }
+    }
+  };
+  const removeAttachment = (publicId: string) => {
+    setAttachments((prev) => prev.filter((a) => a.publicId !== publicId));
+  };
 
   // Restore draft from sessionStorage on mount
   const [title, setTitle] = useState(() => {
@@ -18,10 +44,10 @@ export default function CreatePostDialog({ onClose, onCreated }: CreatePostDialo
       const draft = sessionStorage.getItem(DRAFT_KEY);
       if (draft) {
         const { t } = JSON.parse(draft);
-        return t || '';
+        return t || prefillTitle || '';
       }
     } catch {}
-    return '';
+    return prefillTitle || '';
   });
   const [body, setBody] = useState(() => {
     try {
@@ -115,16 +141,32 @@ export default function CreatePostDialog({ onClose, onCreated }: CreatePostDialo
       setError('Both title and description are required.');
       return;
     }
-    // Block only if match is an FAQ (already answered in FAQ)
-    // Community matches are suggestions — allow posting
-    const faqMatch = duplicateMatch?.matches?.find((m: any) => m.source === 'faq');
-    if (faqMatch) {
+    // Block only if match is a high-confidence FAQ match (score >= 0.85).
+    // Low-confidence / tangential matches are shown as suggestions — posting is allowed.
+    const highConfidenceFaqMatch = duplicateMatch?.matches?.find(
+      (m: any) => m.source === 'faq' && m.score >= 0.85
+    );
+    if (highConfidenceFaqMatch) {
       setError('This question is already answered in our FAQ. Please check the FAQ page first.');
       return;
     }
     setLoading(true);
     try {
-      const res = await api.post<{ post: Post }>('/community', { title: title.trim(), body: body.trim(), tags });
+      const res = await api.post<{ post: Post }>('/community', {
+        title: title.trim(),
+        body: body.trim(),
+        tags,
+        // Send only the persisted fields the backend expects. The full
+        // Cloudinary response has more (eager, etc.) that we don't save.
+        attachments: attachments.map((a) => ({
+          url: a.url,
+          publicId: a.publicId,
+          width: a.width,
+          height: a.height,
+          format: a.format,
+          bytes: a.bytes,
+        })),
+      });
       // Clear draft on success
       try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
       // Show toast with duplicate check result
@@ -150,8 +192,12 @@ export default function CreatePostDialog({ onClose, onCreated }: CreatePostDialo
     }
   };
 
-  const faqMatch = duplicateMatch?.matches?.some((m: any) => m.source === 'faq');
-  const isSubmitDisabled = !title.trim() || !body.trim() || faqMatch || checkingDuplicates || loading;
+  // Only block submission for high-confidence FAQ matches (score >= 0.85).
+  // Low-confidence matches are informational only — posting is always allowed.
+  const hasHighConfidenceFaqMatch = duplicateMatch?.matches?.some(
+    (m: any) => m.source === 'faq' && m.score >= 0.85
+  );
+  const isSubmitDisabled = !title.trim() || !body.trim() || hasHighConfidenceFaqMatch || checkingDuplicates || loading;
 
   return (
     <dialog
@@ -243,7 +289,7 @@ export default function CreatePostDialog({ onClose, onCreated }: CreatePostDialo
           {/* Tags */}
           <div>
             <label htmlFor="post-tags" className="block text-xs font-medium text-ink-soft mb-1.5">
-              Tags <span className="text-ink-faint font-normal">(optional — press Enter or comma to add)</span>
+              Tags <span className="text-ink-faint font-normal">(optional — max 3, press Enter or comma to add)</span>
             </label>
             <div className="flex flex-wrap gap-2 p-3 rounded-xl border border-border bg-mist focus-within:ring-2 focus-within:ring-accent/25 focus-within:bg-card transition-all">
               {tags.map((tag) => (
@@ -268,7 +314,7 @@ export default function CreatePostDialog({ onClose, onCreated }: CreatePostDialo
                   if ((e.key === 'Enter' || e.key === ',') && tagInput.trim()) {
                     e.preventDefault();
                     const newTag = tagInput.trim().replace(/,/g, '');
-                    if (newTag && !tags.includes(newTag)) setTags([...tags, newTag]);
+                    if (newTag && !tags.includes(newTag) && tags.length < 3) setTags([...tags, newTag]);
                     setTagInput('');
                   }
                 }}
@@ -276,6 +322,64 @@ export default function CreatePostDialog({ onClose, onCreated }: CreatePostDialo
                 className="flex-1 min-w-[120px] bg-transparent text-sm text-ink placeholder-ink-faint focus:outline-none"
               />
             </div>
+          </div>
+
+          {/* Attachments */}
+          <div>
+            <label className="block text-xs font-medium text-ink-soft mb-1.5">
+              Attachments <span className="text-ink-faint font-normal">(optional — up to {MAX_ATTACHMENTS} images)</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {attachments.map((a) => (
+                <div key={a.publicId} className="relative w-16 h-16 rounded-lg overflow-hidden border border-border bg-mist group">
+                  <img
+                    src={buildTransformedUrl(a.url, 'w_120,h_120,c_fill,q_auto,f_auto')}
+                    alt="attachment preview"
+                    className="w-full h-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(a.publicId)}
+                    aria-label="Remove attachment"
+                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-ink/70 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {attachments.length < MAX_ATTACHMENTS && (
+                <button
+                  type="button"
+                  onClick={handlePickAttachment}
+                  disabled={attaching}
+                  className="w-16 h-16 rounded-lg border border-dashed border-border bg-mist flex flex-col items-center justify-center text-ink-faint hover:border-accent/50 hover:text-accent transition-colors disabled:opacity-50"
+                >
+                  {attaching ? (
+                    <span className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <path d="M21 15l-5-5L5 21"/>
+                      </svg>
+                      <span className="text-[9px] font-semibold mt-0.5">Add</span>
+                    </>
+                  )}
+                </button>
+              )}
+              <input
+                ref={attachmentInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                multiple
+                onChange={handleAttachmentFile}
+                className="hidden"
+              />
+            </div>
+            {attachmentError && (
+              <p className="text-xs text-danger mt-1">{attachmentError}</p>
+            )}
           </div>
 
           {error && (

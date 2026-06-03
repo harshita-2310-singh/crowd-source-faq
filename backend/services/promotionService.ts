@@ -1,8 +1,15 @@
 /**
  * promotionService.ts
  *
- * Trust-based FAQ promotion system.
+ * 7-stage knowledge lifecycle pipeline.
  * Handles community → FAQ auto-promotion, admin upgrades, and moderator objections.
+ *
+ * Stage gates:
+ *   OPEN (open) → ANSWERED (answered) → COMMUNITY_ACCEPTED (community_accepted)
+ *     → AI_VALIDATED (ai_validated) → ADMIN_ACCEPTED (admin_accepted)
+ *     → CONVERTED_TO_FAQ (converted_to_faq)
+ *
+ * See: context/knowledge-lifecycle-design.md
  */
 
 import mongoose, { Types } from 'mongoose';
@@ -13,36 +20,181 @@ import { generateEmbedding } from '../utils/embeddings.js';
 import { invalidateCache } from '../utils/cache.js';
 import { logger } from '../utils/logger.js';
 import type { Request, Response } from 'express';
+import type { LifecycleStatus } from '../models/CommunityPost.js';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const UPVOTE_THRESHOLD = parseInt(process.env['FAQ_PROMOTION_UPVOTE_THRESHOLD'] ?? '10');
 const REVIEW_WINDOW_HOURS = parseInt(process.env['FAQ_PROMOTION_REVIEW_WINDOW_HOURS'] ?? '24');
 
+// Stage 4 Community-Validation thresholds (per spec)
+// Quality score 0-100, must clear this for promotion to be eligible
+const MIN_QUALITY_SCORE = parseInt(process.env['FAQ_PROMOTION_MIN_QUALITY'] ?? '60');
+// Engagement score 0+, must clear this for promotion to be eligible
+const MIN_ENGAGEMENT_SCORE = parseInt(process.env['FAQ_PROMOTION_MIN_ENGAGEMENT'] ?? '10');
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+
+/** Push a lifecycle statusHistory entry */
+function pushAudit(
+  post: any,
+  to: LifecycleStatus,
+  changedBy: string,
+  note?: string
+): void {
+  if (!post.lifecycle) {
+    post.lifecycle = { status: 'open', statusHistory: [] };
+  }
+  const from = post.lifecycle.status ?? 'open';
+  (post.lifecycle.statusHistory ??= []).push({
+    from,
+    to,
+    changedBy: new Types.ObjectId(changedBy),
+    changedAt: new Date(),
+    note: note ?? null,
+  });
+  post.lifecycle.status = to;
+}
+
+// ─── Stage 4 Quality + Engagement Scores ─────────────────────────────────────
+
+/**
+ * Answer quality score (0-100). Replaces the spec's vague "minimum answer
+ * quality score reached" with a concrete, explainable rubric.
+ *
+ * Components (each 0-20):
+ *   1. Length sweet spot: 50-2000 chars → 20; 20-50 or 2000-4000 → 10
+ *   2. Has a verified/accepted answer
+ *   3. Author was privileged (admin/mod/expert)
+ *   4. Accepted answer received at least one upvote
+ *   5. Has structured DNA (steps + tools) for reproducibility
+ */
+export function computeAnswerQuality(post: any): number {
+  let score = 0;
+  const answer = (post.answer ?? '').trim();
+  const len = answer.length;
+
+  // 1. Length
+  if (len >= 50 && len <= 2000) score += 20;
+  else if (len >= 20 && len < 50) score += 10;
+  else if (len > 2000 && len <= 4000) score += 10;
+
+  // 2. Accepted answer present
+  if (answer) score += 20;
+
+  // 3. Author privilege — only meaningful if answer is from a privileged user
+  if (post.answerIsExpert) score += 20;
+
+  // 4. Upvotes on the answer
+  const answerUpvotes = post.comments?.find?.((c: any) =>
+    c._id?.toString?.() === post.promotionCandidateCommentId?.toString?.()
+  )?.upvotes?.length ?? 0;
+  if (answerUpvotes >= 1) score += 20;
+
+  // 5. DNA present (steps or tools)
+  const dna = post.dna;
+  if (dna && ((dna.steps?.length ?? 0) > 0 || (dna.tools?.length ?? 0) > 0)) score += 20;
+
+  return Math.min(100, score);
+}
+
+/**
+ * Community engagement score (0+, no upper cap).
+ * Combines discussion depth (comments, distinct authors) with signal strength
+ * (upvotes). A "minimum community engagement" gate per spec.
+ */
+export function computeCommunityEngagement(post: any): number {
+  const commentCount = post.comments?.length ?? 0;
+  const upvoteCount = post.upvotes?.length ?? 0;
+
+  // Distinct commenter IDs (top-level + nested replies)
+  const distinctAuthors = new Set<string>();
+  (post.comments ?? []).forEach((c: any) => {
+    if (c.author) distinctAuthors.add(c.author.toString());
+    (c.replies ?? []).forEach((r: any) => {
+      if (r.author) distinctAuthors.add(r.author.toString());
+    });
+  });
+
+  return commentCount * 1 + upvoteCount * 2 + distinctAuthors.size * 5;
+}
+
 // ─── Eligibility Check ────────────────────────────────────────────────────────
 
+/**
+ * A post is eligible for promotion review when ALL of the following hold
+ * (per spec Stage 4 — "Community Validation"):
+ *   - lifecycle.status === 'answered'
+ *   - Has an accepted answer
+ *   - Answer quality score >= MIN_QUALITY_SCORE
+ *   - Community engagement score >= MIN_ENGAGEMENT_SCORE
+ *   - No unresolved reports
+ *   - Not objected by a moderator
+ *   - Not already pending/promoted
+ */
 export async function checkPromotionEligibility(post: any): Promise<boolean> {
-  if (post.status !== 'answered') return false;
+  if (!post) return false;
+  const lc = post.lifecycle?.status ?? 'open';
+  if (lc !== 'answered') return false;
   if (!post.answer || !post.answer.trim()) return false;
   if ((post.reports ?? []).length > 0) return false;
   if (post.promotionObjectedBy) return false;
-  if (post.eligibleForPromotion && post.promotionPendingAt) return false; // already pending or promoted
-  const upvoteCount = post.upvotes?.length ?? 0;
-  return upvoteCount >= UPVOTE_THRESHOLD;
+  if (post.eligibleForPromotion && post.promotionPendingAt) return false;
+
+  // Stage 4 gates
+  const quality = computeAnswerQuality(post);
+  const engagement = computeCommunityEngagement(post);
+  if (quality < MIN_QUALITY_SCORE) return false;
+  if (engagement < MIN_ENGAGEMENT_SCORE) return false;
+
+  return true;
 }
 
 // ─── Start Review Window ───────────────────────────────────────────────────────
 
-export async function startPromotionReview(post: any): Promise<void> {
-  if (post.eligibleForPromotion && post.promotionPendingAt) return; // already pending
+/**
+ * Mark post as entering the community review window.
+ * Sets lifecycle.status = 'community_accepted' and starts the clock.
+ * Idempotent — safe to call multiple times.
+ */
+export async function startPromotionReview(
+  post: any,
+  changedBy?: string
+): Promise<void> {
+  if (post.eligibleForPromotion && post.promotionPendingAt) return;
+
   post.eligibleForPromotion = true;
   post.promotionPendingAt = new Date();
+  post.lifecycle ??= { status: 'open', statusHistory: [] };
+
+  const wasAlreadyAccepted = post.lifecycle.status === 'community_accepted';
+  if (!wasAlreadyAccepted) {
+    pushAudit(
+      post,
+      'community_accepted',
+      changedBy ?? 'system',
+      `Entered ${REVIEW_WINDOW_HOURS}h community review window (${post.upvotes?.length ?? 0} upvotes)`
+    );
+    post.lifecycle.communityAcceptedAt = new Date();
+  }
+
   await post.save();
-  logger.info(`Post ${post._id} entered promotion review window`, { postId: post._id.toString() });
+  logger.info(`Post ${post._id} entered promotion review window`, {
+    postId: post._id.toString(),
+    upvotes: post.upvotes?.length ?? 0,
+  });
 }
 
 // ─── Auto-promote to Community Approved ─────────────────────────────────────
 
-export async function promoteToCommunityApproved(post: any): Promise<any> {
+/**
+ * Promote a post to Community Approved FAQ.
+ * Called by the nightly runPromotionCycle when the review window has elapsed.
+ * Awards +15 to question author.
+ */
+export async function promoteToCommunityApproved(
+  post: any,
+  promotedBy?: string
+): Promise<any> {
   // Idempotent: skip if FAQ already exists for this post
   const existing = await FAQ.findOne({ sourceCommunityPostId: post._id });
   if (existing) return existing;
@@ -55,8 +207,6 @@ export async function promoteToCommunityApproved(post: any): Promise<any> {
   }
 
   const now = new Date();
-  const reviewWindowEndsAt = new Date(now.getTime() + REVIEW_WINDOW_HOURS * 3600 * 1000);
-
   const faq = await FAQ.create({
     question: post.title,
     answer: post.answer,
@@ -64,25 +214,36 @@ export async function promoteToCommunityApproved(post: any): Promise<any> {
     status: 'approved',
     embedding,
     createdBy: post.author,
-    trustLevel: 'medium', // 'medium' = community_approved equivalent
+    trustLevel: 'medium',        // medium = community_approved
     sourceType: 'community_promotion',
     sourceCommunityPostId: post._id,
     promotedAt: now,
     objectionStatus: 'none',
+    sourceCommentId: post.promotionCandidateCommentId ?? null,
     promotionMetadata: {
       upvotesAtPromotion: post.upvotes?.length ?? 0,
       helpfulVotesAtPromotion: null,
-      communityAnswerAuthorId: null,
-      promotedBy: null,
+      communityAnswerAuthorId: post.answerAuthorId ?? null,
+      promotedBy: promotedBy ? new Types.ObjectId(promotedBy) : null,
       objectionReason: null,
       objectionRaisedBy: null,
       objectionRaisedAt: null,
     },
   });
 
-  // Award reputation to the question author
-  await awardPromotionReputation(post.author?.toString() ?? '', 'faq_promotion_community', 50);
+  // Advance lifecycle to ai_validated (auto-AI runs after community approval)
+  pushAudit(post, 'ai_validated', promotedBy ?? 'system', 'Community review window elapsed — AI validation queued');
+  post.lifecycle.aiValidatedAt = new Date();
 
+  // Award +15 to question author for question → FAQ conversion
+  await awardPromotionReputation(
+    post.author?.toString() ?? '',
+    'faq_converted',
+    15,
+    faq._id as Types.ObjectId
+  );
+
+  await post.save();
   logger.info(`Post ${post._id} promoted to Community Approved FAQ ${faq._id}`, {
     faqId: faq._id.toString(),
     postId: post._id.toString(),
@@ -94,41 +255,88 @@ export async function promoteToCommunityApproved(post: any): Promise<any> {
 
 // ─── Admin Upgrades ──────────────────────────────────────────────────────────
 
-export async function promoteToAdminApproved(faqId: string, adminUserId: string): Promise<void> {
+/**
+ * Promote FAQ from 'medium' (community_approved) to 'expert' (admin_approved).
+ * Awards +25 to answer author (if different from question author) and +10 bonus
+ * to question author.
+ */
+export async function promoteToAdminApproved(
+  faqId: string,
+  adminUserId: string
+): Promise<void> {
   const faq = await FAQ.findById(faqId);
   if (!faq) throw new Error('FAQ not found');
-  if (faq.trustLevel === 'expert') throw new Error('FAQ is already at highest trust level');
+  if (faq.trustLevel === 'expert') throw new Error('FAQ is already at expert trust level');
 
   const oldLevel = faq.trustLevel;
-  faq.trustLevel = 'expert'; // 'expert' = admin_approved equivalent
-  if (!faq.promotionMetadata) faq.promotionMetadata = {};
-  faq.promotionMetadata.promotedBy = new Types.ObjectId(adminUserId);
+  faq.trustLevel = 'expert'; // expert = admin_approved
+  if (!faq.promotionMetadata) faq.promotionMetadata = {} as any;
+  const meta = faq.promotionMetadata!;
+  meta.promotedBy = new Types.ObjectId(adminUserId);
   await faq.save();
 
-  if (oldLevel === 'medium') {
-    await awardPromotionReputation(faq.createdBy?.toString() ?? '', 'faq_promotion_admin', 30);
+  const questionAuthorId = faq.createdBy?.toString() ?? '';
+  const answerAuthorId = meta.communityAnswerAuthorId?.toString() ?? '';
+
+  // +25 to answer author for answer being used in FAQ
+  if (answerAuthorId && answerAuthorId !== questionAuthorId) {
+    await awardPromotionReputation(answerAuthorId, 'faq_answer_used', 25, faq._id as Types.ObjectId);
+  }
+
+  // +10 admin approval bonus to question author
+  if (questionAuthorId) {
+    await awardPromotionReputation(
+      questionAuthorId,
+      'admin_approval_bonus',
+      10,
+      faq._id as Types.ObjectId
+    );
+  }
+
+  // Advance community post lifecycle
+  const sourcePost = await CommunityPost.findById(faq.sourceCommunityPostId);
+  if (sourcePost) {
+    pushAudit(sourcePost, 'admin_accepted', adminUserId, `Admin approved FAQ ${faqId}`);
+    sourcePost.lifecycle.adminAcceptedAt = new Date();
+    await sourcePost.save();
   }
 
   logger.info(`FAQ ${faqId} promoted to admin_approved by ${adminUserId}`);
   await invalidateCache();
 }
 
-export async function promoteToOfficial(faqId: string, adminUserId: string): Promise<void> {
+/**
+ * Promote FAQ from 'expert' (admin_approved) to 'high' (official).
+ */
+export async function promoteToOfficial(
+  faqId: string,
+  adminUserId: string
+): Promise<void> {
   const faq = await FAQ.findById(faqId);
   if (!faq) throw new Error('FAQ not found');
 
-  faq.trustLevel = 'high'; // 'high' = official equivalent
-  if (!faq.promotionMetadata) faq.promotionMetadata = {};
-  faq.promotionMetadata.promotedBy = new Types.ObjectId(adminUserId);
+  faq.trustLevel = 'high'; // high = official
+  if (!faq.promotionMetadata) faq.promotionMetadata = {} as any;
+  (faq.promotionMetadata as any).promotedBy = new Types.ObjectId(adminUserId);
   await faq.save();
 
-  await awardPromotionReputation(faq.createdBy?.toString() ?? '', 'faq_promotion_official', 20);
+  // Mark community post as fully converted
+  const sourcePost = await CommunityPost.findById(faq.sourceCommunityPostId);
+  if (sourcePost) {
+    pushAudit(sourcePost, 'converted_to_faq', adminUserId, `FAQ ${faqId} is now official`);
+    sourcePost.lifecycle.convertedToFaqAt = new Date();
+    await sourcePost.save();
+  }
+
   logger.info(`FAQ ${faqId} promoted to official by ${adminUserId}`);
   await invalidateCache();
 }
 
 // ─── Moderator Objection ──────────────────────────────────────────────────────
 
+/**
+ * Block promotion — moderator objects to a community post entering the pipeline.
+ */
 export async function objectToPromotion(
   postId: string,
   moderatorId: string,
@@ -147,6 +355,9 @@ export async function objectToPromotion(
   logger.warn(`Promotion objected for post ${postId} by ${moderatorId}: ${reason}`);
 }
 
+/**
+ * Moderator objects to an existing FAQ that was promoted from community.
+ */
 export async function objectToFAQPromotion(
   faqId: string,
   moderatorId: string,
@@ -156,10 +367,11 @@ export async function objectToFAQPromotion(
   if (!faq) throw new Error('FAQ not found');
 
   faq.objectionStatus = 'objected';
-  if (!faq.promotionMetadata) faq.promotionMetadata = {};
-  faq.promotionMetadata.objectionRaisedBy = new Types.ObjectId(moderatorId);
-  faq.promotionMetadata.objectionRaisedAt = new Date();
-  faq.promotionMetadata.objectionReason = reason;
+  if (!faq.promotionMetadata) faq.promotionMetadata = {} as any;
+  const meta = faq.promotionMetadata!;
+  meta.objectionRaisedBy = new Types.ObjectId(moderatorId);
+  meta.objectionRaisedAt = new Date();
+  meta.objectionReason = reason;
   await faq.save();
 
   logger.warn(`FAQ promotion objected for FAQ ${faqId} by ${moderatorId}: ${reason}`);
@@ -167,16 +379,30 @@ export async function objectToFAQPromotion(
 
 // ─── Reputation ───────────────────────────────────────────────────────────────
 
+/**
+ * Award (or deduct) promotion-related reputation points.
+ * Logs to ReputationLog and triggers auto-badge check.
+ */
 async function awardPromotionReputation(
   userId: string,
   action: string,
-  points: number
+  points: number,
+  targetId?: Types.ObjectId
 ): Promise<void> {
   if (!userId) return;
   try {
     const user = await User.findById(userId);
     if (!user) return;
     user.points = Math.max(0, user.points + points);
+    user.reputation = user.points;
+
+    // Increment denormalized counters for leaderboard trust score
+    if (action === 'faq_converted') {
+      user.faqContributions = (user.faqContributions ?? 0) + 1;
+    } else if (action === 'faq_answer_used') {
+      user.faqContributions = (user.faqContributions ?? 0) + 1;
+    }
+
     await user.save();
 
     const ReputationLog = (await import('../models/ReputationLog.js')).default;
@@ -184,8 +410,8 @@ async function awardPromotionReputation(
       userId: new Types.ObjectId(userId),
       delta: points,
       reason: `FAQ promotion: ${action}`,
-      action,
-      targetId: null,
+      action: action as any,
+      targetId: targetId ?? null,
       targetType: 'faq_promotion',
     });
 
@@ -198,6 +424,7 @@ async function awardPromotionReputation(
 
 // ─── Admin Controllers ─────────────────────────────────────────────────────────
 
+/** GET /api/admin/community-promotions — paginated queue of promoted posts */
 export async function getCommunityPendingFAQs(req: Request, res: Response): Promise<void> {
   try {
     const page = Math.max(1, parseInt(String(req.query.page ?? '1')));
@@ -205,7 +432,7 @@ export async function getCommunityPendingFAQs(req: Request, res: Response): Prom
 
     const [faqs, total] = await Promise.all([
       FAQ.find({ sourceType: 'community_promotion' })
-        .populate('sourceCommunityPostId', 'title status upvotes')
+        .populate('sourceCommunityPostId', 'title status upvotes lifecycle')
         .sort({ promotedAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit),
@@ -218,13 +445,44 @@ export async function getCommunityPendingFAQs(req: Request, res: Response): Prom
   }
 }
 
+/**
+ * PATCH /api/admin/community-promotions/:id — approve (expert/high), reject, or edit
+ * Body: { action: 'approve'|'reject'|'edit', targetLevel?, edits? }
+ */
 export async function promoteFAQ(req: Request, res: Response): Promise<void> {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const { targetLevel } = req.body as { targetLevel?: string };
+    const { action, targetLevel, edits } = req.body as {
+      action?: string;
+      targetLevel?: string;
+      edits?: { question?: string; answer?: string; category?: string; tags?: string[] };
+    };
 
+    if (action === 'reject') {
+      const faq = await FAQ.findById(id);
+      if (faq) {
+        faq.objectionStatus = 'objected';
+        await faq.save();
+      }
+      res.json({ message: 'FAQ rejected.' });
+      return;
+    }
+
+    if (action === 'edit' && edits) {
+      const faq = await FAQ.findById(id);
+      if (!faq) { res.status(404).json({ message: 'FAQ not found' }); return; }
+      if (edits.question) faq.question = edits.question;
+      if (edits.answer) faq.answer = edits.answer;
+      if (edits.category) faq.category = edits.category;
+      if (edits.tags) faq.tags = edits.tags;
+      await faq.save();
+      res.json({ message: 'FAQ updated.', faq });
+      return;
+    }
+
+    // Default: approve
     if (!['expert', 'high'].includes(targetLevel ?? '')) {
-      res.status(400).json({ message: 'targetLevel must be expert (admin_approved) or high (official)' });
+      res.status(400).json({ message: 'targetLevel must be expert or high' });
       return;
     }
 
@@ -240,6 +498,7 @@ export async function promoteFAQ(req: Request, res: Response): Promise<void> {
   }
 }
 
+/** POST /api/admin/community-promotions/:id/object — record moderator objection */
 export async function objectToFAQ(req: Request, res: Response): Promise<void> {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -257,8 +516,71 @@ export async function objectToFAQ(req: Request, res: Response): Promise<void> {
   }
 }
 
+// ─── Admin Promotion Queue ────────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/community-promotions/queue
+ *
+ * Returns community posts in the admin review pipeline:
+ * - lifecycle.status = 'ai_validated' (ready for admin decision)
+ * - lifecycle.status = 'community_accepted' with duplicateOf set (needs merge decision)
+ *
+ * Returns posts with full AI output, source FAQ metadata, and related info.
+ */
+export async function getPromotionQueue(req: Request, res: Response): Promise<void> {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1')));
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit ?? '20'))));
+
+    const posts = await CommunityPost.find({
+      'lifecycle.status': { $in: ['ai_validated', 'community_accepted'] },
+      'lifecycle.communityAcceptedAt': { $ne: null },
+    })
+      .populate('author', 'name')
+      .sort({ 'lifecycle.communityAcceptedAt': -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select('-embedding');
+
+    const total = await CommunityPost.countDocuments({
+      'lifecycle.status': { $in: ['ai_validated', 'community_accepted'] },
+      'lifecycle.communityAcceptedAt': { $ne: null },
+    });
+
+    const postIds = posts.map(p => p._id);
+    const existingFaqs = await FAQ.find({ sourceCommunityPostId: { $in: postIds } })
+      .select('_id sourceCommunityPostId trustLevel')
+      .lean();
+    const faqMap = new Map(existingFaqs.map(f => [f.sourceCommunityPostId?.toString() ?? '', f]));
+
+    const queue = posts.map(p => {
+      const postObj = p.toObject() as unknown as Record<string, unknown>;
+      const existingFaq = faqMap.get(p._id.toString());
+      return {
+        ...postObj,
+        existingFaq: existingFaq ?? null,
+        status: p.lifecycle?.status,
+        aiGeneratedFaq: p.lifecycle?.aiGeneratedFaq ?? null,
+        communityAcceptedAt: p.lifecycle?.communityAcceptedAt,
+        aiValidatedAt: p.lifecycle?.aiValidatedAt,
+        statusHistory: p.lifecycle?.statusHistory ?? [],
+        upvotes: p.upvotes?.length ?? 0,
+        commentCount: p.comments?.length ?? 0,
+      };
+    });
+
+    res.json({ queue, total, page, limit });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: (error as Error).message });
+  }
+}
+
 // ─── Idempotent Promotion Scheduler ──────────────────────────────────────────
 
+/**
+ * Nightly job — promotes posts whose review window has elapsed.
+ * Only acts on posts with lifecycle.status = 'community_accepted' and no objection.
+ */
 export async function runPromotionCycle(): Promise<void> {
   try {
     const reviewCutoff = new Date(Date.now() - REVIEW_WINDOW_HOURS * 3600 * 1000);
@@ -267,6 +589,7 @@ export async function runPromotionCycle(): Promise<void> {
       eligibleForPromotion: true,
       promotionPendingAt: { $ne: null, $lte: reviewCutoff },
       promotionObjectedBy: null,
+      'lifecycle.status': 'community_accepted',
     }).limit(50);
 
     let promoted = 0;
@@ -296,4 +619,21 @@ export function getTrustBadgeInfo(level?: string): { label: string; class: strin
     low:         { label: 'Community', class: 'bg-amber-50 text-amber-700 border-amber-200' },
   };
   return map[level] ?? null;
+}
+
+// ─── Lifecycle status chip helper (for frontend) ─────────────────────────────
+
+export function getLifecycleChipInfo(
+  status?: LifecycleStatus
+): { label: string; class: string } | null {
+  if (!status) return null;
+  const map: Record<LifecycleStatus, { label: string; class: string }> = {
+    open:               { label: 'Open', class: 'bg-gray-100 text-gray-600 border-gray-200' },
+    answered:           { label: 'Answered', class: 'bg-blue-50 text-blue-700 border-blue-200' },
+    community_accepted: { label: 'Community Approved', class: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    ai_validated:       { label: 'AI Validated', class: 'bg-purple-50 text-purple-700 border-purple-200' },
+    admin_accepted:     { label: 'Admin Approved', class: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+    converted_to_faq:   { label: 'Official FAQ', class: 'bg-stone-100 text-stone-700 border-stone-300' },
+  };
+  return map[status] ?? null;
 }

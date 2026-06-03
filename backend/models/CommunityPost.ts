@@ -49,6 +49,15 @@ export type CommunityPostStatus = 'answered' | 'unanswered';
 export type EscalationStatus = 'none' | 'escalated' | 'resolved' | 'dismissed';
 export type TimeTrialStatus = 'none' | 'pending' | 'awarded';
 
+/** Lifecycle pipeline statuses — see context/knowledge-lifecycle-design.md */
+export type LifecycleStatus =
+  | 'open'
+  | 'answered'
+  | 'community_accepted'
+  | 'ai_validated'
+  | 'admin_accepted'
+  | 'converted_to_faq';
+
 // ─── Document interface ─────────────────────────────────────────────────────────
 export interface ICommunityPost extends Document {
   title: string;
@@ -58,10 +67,25 @@ export interface ICommunityPost extends Document {
   status: CommunityPostStatus;
   answer: string | null;
   answerIsExpert?: boolean;
+  answerAuthorId?: Types.ObjectId | null;
   upvotes: Types.ObjectId[];
   comments: Types.Subdocument[];
   reports: Array<{ reportedBy: Types.ObjectId; reason: string; createdAt?: Date }>;
   embedding?: number[];
+  /**
+   * Cloudinary-backed image attachments. Stored as plain metadata
+   * (URL + publicId) — the actual bytes live in Cloudinary. We keep
+   * width/height so the feed can render a correctly-sized placeholder
+   * without re-fetching the image first.
+   */
+  attachments: Array<{
+    url: string;
+    publicId: string;
+    width?: number;
+    height?: number;
+    format?: string;
+    bytes?: number;
+  }>;
   escalationStatus: EscalationStatus;
   escalatedAt: Date | null;
   escalationReason: string | null;
@@ -87,6 +111,40 @@ export interface ICommunityPost extends Document {
   promotionObjectedBy?: Types.ObjectId | null;
   promotionObjectedAt?: Date | null;
   promotionObjectionReason?: string | null;
+  // Admin moderation (per spec: hide / lock / merge / delete)
+  isHidden?: boolean;
+  isLocked?: boolean;
+  hiddenAt?: Date | null;
+  hiddenBy?: Types.ObjectId | null;
+  hiddenReason?: string | null;
+  lockedAt?: Date | null;
+  lockedBy?: Types.ObjectId | null;
+  lockedReason?: string | null;
+  /** 7-stage knowledge pipeline — see context/knowledge-lifecycle-design.md */
+  lifecycle: {
+    status: LifecycleStatus;
+    statusHistory: Array<{
+      from: string;
+      to: string;
+      changedBy: Types.ObjectId;
+      changedAt: Date;
+      note?: string;
+    }>;
+    communityAcceptedAt?: Date;
+    aiValidatedAt?: Date;
+    adminAcceptedAt?: Date;
+    convertedToFaqAt?: Date;
+    aiGeneratedFaq?: {
+      question: string;
+      answer: string;
+      category: string;
+      tags: string[];
+      confidenceScore: number;
+      duplicateOf?: Types.ObjectId;
+      hallucinationFlags: string[];
+      grammarIssues: string[];
+    };
+  };
 }
 
 // ─── Schema ─────────────────────────────────────────────────────────────────────
@@ -103,6 +161,7 @@ const communityPostSchema = new MongooseSchema(
     },
     answer: { type: String, default: null },
     answerIsExpert: { type: Boolean, default: false },
+    answerAuthorId: { type: MongooseSchema.Types.ObjectId, ref: 'User', default: null },
     // Solution DNA — compact answer summary for resolved posts
     dna: {
       steps: { type: [String], default: [] },
@@ -112,6 +171,19 @@ const communityPostSchema = new MongooseSchema(
     },
     upvotes: { type: [MongooseSchema.Types.ObjectId], ref: 'User', default: [] },
     comments: { type: [commentSchema], default: [] },
+    // Cloudinary image attachments. Capped at 4 in the controller — the
+    // feed can show a grid up to that without reflowing the layout.
+    attachments: {
+      type: [{
+        url: { type: String, required: true },
+        publicId: { type: String, required: true },
+        width: { type: Number },
+        height: { type: Number },
+        format: { type: String },
+        bytes: { type: Number },
+      }],
+      default: [],
+    },
     reports: {
       type: [{
         reportedBy: { type: MongooseSchema.Types.ObjectId, ref: 'User' },
@@ -148,6 +220,50 @@ const communityPostSchema = new MongooseSchema(
     promotionObjectedBy: { type: MongooseSchema.Types.ObjectId, ref: 'User', default: null },
     promotionObjectedAt: { type: Date, default: null },
     promotionObjectionReason: { type: String, default: null },
+    // Admin moderation
+    isHidden: { type: Boolean, default: false },
+    isLocked: { type: Boolean, default: false },
+    hiddenAt: { type: Date, default: null },
+    hiddenBy: { type: MongooseSchema.Types.ObjectId, ref: 'User', default: null },
+    hiddenReason: { type: String, default: null },
+    lockedAt: { type: Date, default: null },
+    lockedBy: { type: MongooseSchema.Types.ObjectId, ref: 'User', default: null },
+    lockedReason: { type: String, default: null },
+    // 7-stage lifecycle pipeline
+    lifecycle: {
+      type: {
+        status: {
+          type: String,
+          enum: ['open', 'answered', 'community_accepted', 'ai_validated', 'admin_accepted', 'converted_to_faq'] as LifecycleStatus[],
+          default: 'open',
+        },
+        statusHistory: [{
+          from: { type: String, default: '' },
+          to: { type: String, default: '' },
+          changedBy: { type: MongooseSchema.Types.ObjectId, ref: 'User' },
+          changedAt: { type: Date, default: Date.now },
+          note: { type: String, default: null },
+        }],
+        communityAcceptedAt: { type: Date, default: null },
+        aiValidatedAt: { type: Date, default: null },
+        adminAcceptedAt: { type: Date, default: null },
+        convertedToFaqAt: { type: Date, default: null },
+        aiGeneratedFaq: {
+          type: {
+            question: { type: String, default: '' },
+            answer: { type: String, default: '' },
+            category: { type: String, default: '' },
+            tags: { type: [String], default: [] },
+            confidenceScore: { type: Number, default: 0 },
+            duplicateOf: { type: MongooseSchema.Types.ObjectId, default: null },
+            hallucinationFlags: { type: [String], default: [] },
+            grammarIssues: { type: [String], default: [] },
+          },
+          default: null,
+        },
+      },
+      default: () => ({ status: 'open', statusHistory: [] }),
+    },
   },
   { timestamps: true }
 );
@@ -165,6 +281,10 @@ communityPostSchema.index({ status: 1, eligibleForPromotion: 1 });
 communityPostSchema.index({ author: 1, createdAt: -1 });
 communityPostSchema.index({ escalationStatus: 1, createdAt: 1 });
 communityPostSchema.index({ reports: 1 });
+// Lifecycle pipeline indexes
+communityPostSchema.index({ 'lifecycle.status': 1, createdAt: 1 });
+communityPostSchema.index({ 'lifecycle.communityAcceptedAt': 1 });
+communityPostSchema.index({ 'lifecycle.aiValidatedAt': 1 });
 
 export default mongoose.model<ICommunityPost>(
   'CommunityPost',

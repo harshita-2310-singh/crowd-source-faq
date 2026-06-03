@@ -1,30 +1,67 @@
 import mongoose, { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+// ─── Enums ────────────────────────────────────────────────────────────────────
 
 export type ZoomMeetingStatus = 'pending' | 'processing' | 'completed' | 'failed';
-export type ZoomInsightType = 'FAQ' | 'Announcement';
+export type ZoomInsightType   = 'FAQ' | 'Announcement';
+
+/**
+ * How the transcript entered the system.
+ * - webhook    : received via Zoom webhook (auto-download)
+ * - manual_vtt : manually uploaded .vtt file
+ * - manual_txt : manually uploaded .txt file
+ * - manual_raw : raw text pasted directly (via rawText body field)
+ */
+export type TranscriptSourcing = 'webhook' | 'manual_vtt' | 'manual_txt' | 'manual_raw';
+
+/**
+ * Source type for FAQ promotion metadata.
+ * Persisted on ZoomInsight so it carries through to the generated FAQ.
+ */
+export type InsightSourceType = 'zoom_transcript' | 'vtt_file' | 'txt_file' | 'manual_upload';
+
+/**
+ * Human-readable source type for the meeting as a whole.
+ * Used in ZoomMeeting documents.
+ */
+export type MeetingSourceType = 'zoom' | 'vtt' | 'txt' | 'manual';
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 
 export interface IZoomInsight extends Document {
   meetingId: Types.ObjectId;
   type: ZoomInsightType;
-  question?: string;          // for FAQ
-  answer_or_content: string;   // answer (FAQ) or full announcement text
-  confidence_score: number;    // 0.0 – 1.0 from LLM
+  question?: string;
+  answer_or_content: string;
+  confidence_score: number;
   status: 'pending_review' | 'approved' | 'rejected';
   reviewedBy?: Types.ObjectId;
   reviewedAt?: Date;
-  publishedFaqId?: Types.ObjectId; // if approved and promoted to an FAQ
-  transcript_snippet?: string;  // short excerpt from transcript this was derived from
+  publishedFaqId?: Types.ObjectId;
+
+  // ── Provenance ─────────────────────────────────────────────────────────────
+  /** How this insight's source transcript was obtained */
+  sourcing: TranscriptSourcing;
+  /** Which AI provider processed this insight */
+  processedBy: string;
+  /** Wall-clock timestamp from the transcript (e.g. "01:23") when this Q&A occurred */
+  transcriptTimestamp?: string;
+  /** Speaker name at the time of this Q&A */
+  speaker?: string;
+  /** Carried forward to the generated FAQ as metadata */
+  sourceType: InsightSourceType;
+  /** Snapshot of meeting title at processing time (in case topic is edited later) */
+  sourceTitle?: string;
+  /** Short excerpt from the transcript this was derived from */
+  transcript_snippet?: string;
+
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface IZoomMeeting extends Document {
-  userId: Types.ObjectId;        // owning user (from Zoom OAuth)
-  zoomMeetingId: string;          // Zoom's internal meeting ID
+  userId: Types.ObjectId;
+  zoomMeetingId: string; // Zoom's ID; 'manual-{timestamp}' for uploads
   topic: string;
   startTime: Date;
   duration?: number;
@@ -35,6 +72,18 @@ export interface IZoomMeeting extends Document {
   errorMessage?: string;
   processingStartedAt?: Date;
   processingCompletedAt?: Date;
+
+  // ── Provenance ─────────────────────────────────────────────────────────────
+  /** How the transcript was obtained */
+  sourcing: TranscriptSourcing;
+  /** Which AI provider processed this meeting */
+  processedBy?: string;
+  /** Human-readable source type */
+  sourceType: MeetingSourceType;
+  /** For manual uploads: the user who uploaded (defaults to userId for webhook) */
+  manualUploadedBy?: Types.ObjectId;
+  /** Real-time processing stage for UI progress bar */
+  progress: { stage: 'queued' | 'parsing' | 'extracting' | 'embedding' | 'storing' | 'done' | 'failed'; percent: number; message: string };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -82,6 +131,24 @@ const zoomInsightSchema = new MongooseSchema<IZoomInsight>(
       type: MongooseSchema.Types.ObjectId,
       ref: 'FAQ',
     },
+    // ── Provenance ───────────────────────────────────────────────────────────
+    sourcing: {
+      type: String,
+      enum: ['webhook', 'manual_vtt', 'manual_txt', 'manual_raw'] as TranscriptSourcing[],
+      required: true,
+    },
+    processedBy: {
+      type: String,
+      required: true,
+    },
+    transcriptTimestamp: String,
+    speaker: String,
+    sourceType: {
+      type: String,
+      enum: ['zoom_transcript', 'vtt_file', 'txt_file', 'manual_upload'] as InsightSourceType[],
+      required: true,
+    },
+    sourceTitle: String,
     transcript_snippet: {
       type: String,
       maxlength: 500,
@@ -90,7 +157,7 @@ const zoomInsightSchema = new MongooseSchema<IZoomInsight>(
   { timestamps: true }
 );
 
-// ─── Meeting Schema ─────────────────────────────────────────────────────────────
+// ─── Meeting Schema ────────────────────────────────────────────────────────────
 
 const zoomMeetingSchema = new MongooseSchema<IZoomMeeting>(
   {
@@ -127,11 +194,36 @@ const zoomMeetingSchema = new MongooseSchema<IZoomMeeting>(
     errorMessage: String,
     processingStartedAt: Date,
     processingCompletedAt: Date,
+    // ── Provenance ───────────────────────────────────────────────────────────
+    sourcing: {
+      type: String,
+      enum: ['webhook', 'manual_vtt', 'manual_txt', 'manual_raw'] as TranscriptSourcing[],
+      required: true,
+    },
+    processedBy: String,
+    sourceType: {
+      type: String,
+      enum: ['zoom', 'vtt', 'txt', 'manual'] as MeetingSourceType[],
+      required: true,
+    },
+    manualUploadedBy: {
+      type: MongooseSchema.Types.ObjectId,
+      ref: 'User',
+    },
+    progress: {
+      stage: {
+        type: String,
+        enum: ['queued', 'parsing', 'extracting', 'embedding', 'storing', 'done', 'failed'],
+        default: 'queued',
+      },
+      percent: { type: Number, default: 0, min: 0, max: 100 },
+      message: { type: String, default: 'Queued for processing' },
+    },
   },
   { timestamps: true }
 );
 
-// ─── Indexes ──────────────────────────────────────────────────────────────────
+// ─── Indexes ───────────────────────────────────────────────────────────────────
 
 zoomMeetingSchema.index({ userId: 1, zoomMeetingId: 1 }, { unique: true });
 zoomMeetingSchema.index({ userId: 1, status: 1, startTime: -1 });
@@ -141,7 +233,15 @@ zoomInsightSchema.index({ meetingId: 1 });
 zoomInsightSchema.index({ status: 1, type: 1 });
 zoomInsightSchema.index({ publishedFaqId: 1 }, { sparse: true });
 
-// ─── Models ───────────────────────────────────────────────────────────────────
+// ─── Models ────────────────────────────────────────────────────────────────────
 
-export const ZoomMeeting = mongoose.model<IZoomMeeting>('ZoomMeeting', zoomMeetingSchema, 'yaksha_zoom_meetings');
-export const ZoomInsight = mongoose.model<IZoomInsight>('ZoomInsight', zoomInsightSchema, 'yaksha_zoom_insights');
+export const ZoomMeeting = mongoose.model<IZoomMeeting>(
+  'ZoomMeeting',
+  zoomMeetingSchema,
+  'yaksha_zoom_meetings'
+);
+export const ZoomInsight = mongoose.model<IZoomInsight>(
+  'ZoomInsight',
+  zoomInsightSchema,
+  'yaksha_zoom_insights'
+);

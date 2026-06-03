@@ -8,8 +8,10 @@ import Avatar from '../components/ui/Avatar';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import { CommunityDoodles } from '../components/ui/PageDoodles';
+import CommunityHealth from '../components/ui/CommunityHealth';
 import api from '../utils/api';
 import { useAuth } from '../hooks/useAuth';
+import { useAuthGate } from '../context/AuthModalContext';
 import type { Post } from '../types/ui';
 
 // Modular dialog components
@@ -19,6 +21,11 @@ import CreatePostDialog from '../components/community/CreatePostDialog';
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CommunityPage() {
   const { user } = useAuth();
+  const gate = useAuthGate();
+  const handleAskQuestion = gate(
+    () => setShowCreate(true),
+    'Sign in to ask a question in the community.'
+  );
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [total, setTotal] = useState(0);
@@ -38,6 +45,7 @@ export default function CommunityPage() {
 
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [createPrefillTitle, setCreatePrefillTitle] = useState('');
 
   // Backend uses cursor-based pagination. The previous version sent `?page=2`
   // which the backend silently ignored — so every "Load more" call returned
@@ -84,15 +92,19 @@ export default function CommunityPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
 
-    // ?ask=true — guard auth, redirect if not logged in
+    // ?ask=true — open the create dialog. The navbar's "Ask Question" button
+    // already gates this behind the auth modal, so by the time we get here
+    // (after the gate's pending-action replay) the user is authenticated.
     if (params.get('ask') === 'true') {
-      if (!user) {
+      if (user) {
+        const prefilledTitle = params.get('title') || '';
+        setCreatePrefillTitle(prefilledTitle);
+        setShowCreate(true);
         window.history.replaceState({}, '', window.location.pathname);
-        navigate('/login?redirect=/community?ask=true');
-        return;
       }
-      setShowCreate(true);
-      window.history.replaceState({}, '', window.location.pathname);
+      // If not authed here, ignore — the navbar gate's replay only fires
+      // after a successful login, and the user is already back on /community
+      // at that point. No redirect to /login (route no longer exists).
     }
 
     // ?post=<id> — open thread, fetch individually if not in cached list
@@ -118,7 +130,7 @@ export default function CommunityPage() {
       }
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, [posts, user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [posts, user, window.location.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchPosts(true);
@@ -246,7 +258,7 @@ export default function CommunityPage() {
             )}
           </div>
           <Button
-            onClick={() => setShowCreate(true)}
+            onClick={handleAskQuestion}
             id="ask-question-btn"
             size="sm"
             className="sm:!px-5 sm:!py-2.5 sm:!text-sm flex-shrink-0"
@@ -258,6 +270,8 @@ export default function CommunityPage() {
             <span className="sm:hidden">Ask</span>
           </Button>
         </div>
+
+        <CommunityHealth />
 
         {!loading && total > 0 && (
           <div className="relative mb-4">
@@ -349,7 +363,7 @@ export default function CommunityPage() {
             </div>
             <p className="text-sm font-medium text-ink-soft">No discussions yet</p>
             <p className="text-xs text-ink-faint mt-1">Be the first to ask a question!</p>
-            <Button onClick={() => setShowCreate(true)} className="mt-4">
+            <Button onClick={handleAskQuestion} className="mt-4">
               Ask a Question
             </Button>
           </div>
@@ -411,8 +425,9 @@ export default function CommunityPage() {
 
       {showCreate && (
         <CreatePostDialog
-          onClose={() => setShowCreate(false)}
+          onClose={() => { setShowCreate(false); setCreatePrefillTitle(''); }}
           onCreated={handlePostCreated}
+          prefillTitle={createPrefillTitle}
         />
       )}
     </div>

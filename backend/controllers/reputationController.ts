@@ -168,21 +168,92 @@ export const revokeBadge = async (req: Request, res: Response): Promise<void> =>
 export const getLeaderboard = async (req: Request, res: Response): Promise<void> => {
   try {
     const limit = Math.min(parseInt(String(req.query.limit ?? '10')), 50);
-    const users = await User.find({ isDeleted: false, isBanned: false })
-      .sort({ points: -1, reputation: -1 })
-      .limit(limit)
-      .select('name points reputation tier positiveBadges createdAt');
-    const rank = users.map((u, i) => ({
-      rank: i + 1,
-      userId: u._id, name: u.name,
-      points: u.points, reputation: u.reputation,
-      tier: u.tier,
-      badges: u.positiveBadges.length,
-      joinedAt: u.createdAt,
-    }));
-    res.json({ leaderboard: rank, total: rank.length });
+    const period = String(req.query.period ?? 'all'); // 'weekly' | 'monthly' | 'all'
+
+    // For weekly/monthly, aggregate from ReputationLog; for 'all', use User.points
+    if (period === 'all') {
+      const users = await User.find({ isDeleted: false, isBanned: false })
+        .sort({ points: -1, reputation: -1 })
+        .limit(limit)
+        .select('name points reputation tier positiveBadges createdAt acceptedAnswers faqContributions');
+
+      const rank = users.map((u, i) => {
+        const accountAgeDays = Math.max(0, (Date.now() - new Date(u.createdAt ?? Date.now()).getTime()) / 86400000);
+        const trustScore = Math.min(100, Math.round(
+          (accountAgeDays / 365) * 20 +
+          (u.acceptedAnswers ?? 0) * 2 +
+          (u.faqContributions ?? 0) * 3
+        ));
+        return {
+          rank: i + 1,
+          userId: u._id, name: u.name,
+          points: u.points, reputation: u.reputation,
+          tier: u.tier,
+          badges: u.positiveBadges.length,
+          acceptedAnswers: u.acceptedAnswers ?? 0,
+          faqContributions: u.faqContributions ?? 0,
+          trustScore,
+          joinedAt: u.createdAt,
+        };
+      });
+      res.json({ leaderboard: rank, total: rank.length, period });
+      return;
+    }
+
+    // Time-filtered: aggregate from ReputationLog
+    const now = new Date();
+    const since = new Date(
+      period === 'weekly'
+        ? now.getTime() - 7 * 24 * 60 * 60 * 1000
+        : now.getTime() - 30 * 24 * 60 * 60 * 1000
+    );
+
+    const ReputationLogModel = (await import('../models/ReputationLog.js')).default;
+    const aggregation = await ReputationLogModel.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      { $group: {
+        _id: '$userId',
+        periodPoints: { $sum: '$delta' },
+      }},
+      { $sort: { periodPoints: -1 } },
+      { $limit: limit },
+    ]);
+
+    const userIds = aggregation.map(a => a._id);
+    const users = await User.find({ _id: { $in: userIds }, isDeleted: false, isBanned: false })
+      .select('name points reputation tier positiveBadges createdAt acceptedAnswers faqContributions');
+
+    const userMap = new Map(users.map(u => [u._id.toString(), u]));
+    const leaderboard = aggregation
+      .map((a, i) => {
+        const user = userMap.get(a._id.toString());
+        if (!user) return null;
+        const accountAgeDays = Math.max(0, (Date.now() - new Date(user.createdAt ?? Date.now()).getTime()) / 86400000);
+        const trustScore = Math.min(100, Math.round(
+          (accountAgeDays / 365) * 20 +
+          (user.acceptedAnswers ?? 0) * 2 +
+          (user.faqContributions ?? 0) * 3
+        ));
+        return {
+          rank: i + 1,
+          userId: user._id,
+          name: user.name,
+          points: user.points,
+          reputation: user.reputation,
+          periodPoints: a.periodPoints,
+          tier: user.tier,
+          badges: user.positiveBadges.length,
+          acceptedAnswers: user.acceptedAnswers ?? 0,
+          faqContributions: user.faqContributions ?? 0,
+          trustScore,
+          joinedAt: user.createdAt,
+        };
+      })
+      .filter(Boolean);
+
+    res.json({ leaderboard, total: leaderboard.length, period });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
+    res.status(500).json({ message: 'Server error' });
   }
 };
 

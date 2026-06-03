@@ -4,6 +4,8 @@ import { useAuth } from '../../hooks/useAuth';
 
 type TeaEventType = 'faq_published' | 'post_answered' | 'post_deleted' | 'post_answered_user';
 
+interface ToastState { msg: string; type: 'success' | 'info' };
+
 interface TeaDrop {
   _id: string;
   eventType: TeaEventType;
@@ -47,8 +49,10 @@ export default function SpillTheTea() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastSeenIdRef = useRef<string | null>(null);
 
   const fetchTea = useCallback(async (pageNum = 1, reset = false) => {
     if (!user) return;
@@ -57,7 +61,27 @@ export default function SpillTheTea() {
       const res = await api.get<{ drops: TeaDrop[]; hasMore: boolean; unreadCount: number }>(
         `/notifications/tea?page=${pageNum}&limit=20`
       );
-      setDrops((prev) => (reset ? res.data.drops : [...prev, ...res.data.drops]));
+      const newDrops = res.data.drops;
+
+      // Background poll (dropdown closed): detect new post_answered events and toast
+      if (!open && newDrops.length > 0) {
+        const latestDrop = newDrops[0];
+        // Only toast for post_answered (Admin/AI resolved) and only if it's a new drop
+        if (
+          latestDrop.eventType === 'post_answered' &&
+          lastSeenIdRef.current !== null &&
+          latestDrop._id !== lastSeenIdRef.current
+        ) {
+          setToast({
+            msg: `"${latestDrop.postTitle}" was answered by ${latestDrop.triggeredByName ?? 'the team'}`,
+            type: 'success',
+          });
+          setTimeout(() => setToast(null), 4000);
+        }
+        lastSeenIdRef.current = latestDrop._id;
+      }
+
+      setDrops((prev) => (reset ? newDrops : [...prev, ...newDrops]));
       setUnread(res.data.unreadCount);
       setHasMore(res.data.hasMore);
       setPage(pageNum);
@@ -66,6 +90,16 @@ export default function SpillTheTea() {
     } finally {
       setLoading(false);
     }
+  }, [user, open]);
+
+  // Init lastSeenIdRef on first load so we don't toast on pre-existing data
+  useEffect(() => {
+    if (!user) return;
+    // Initial load only — set lastSeenIdRef without triggering toast logic
+    fetchTea(1, true).then(() => {
+      // lastSeenIdRef is set inside fetchTea after this resolves
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
@@ -77,6 +111,17 @@ export default function SpillTheTea() {
     }
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, [open, fetchTea]);
+
+  // Background poll (dropdown closed): only run when the dropdown is closed so
+  // new post_answered events surface as a toast. The 60s cadence is slower than
+  // the open-state 30s poll because we don't need a fresh list — fetchTea's
+  // !open branch only reads the latest drop id and toasts on a new one. The
+  // lastSeenIdRef guard inside fetchTea prevents toasting on pre-existing data.
+  useEffect(() => {
+    if (!user || open) return;
+    const id = setInterval(() => fetchTea(1, true), 60_000);
+    return () => clearInterval(id);
+  }, [user, open, fetchTea]);
 
   useEffect(() => {
     if (!open) return;
@@ -216,6 +261,14 @@ export default function SpillTheTea() {
               {loading ? 'Loading…' : 'Load more tea →'}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Background-poll toast: new post_answered from Admin/AI */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl bg-ink text-white text-sm font-medium shadow-lg flex items-center gap-2 animate-fade-in">
+          <span>✅</span>
+          <span>{toast.msg}</span>
         </div>
       )}
     </div>

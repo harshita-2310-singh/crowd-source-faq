@@ -197,9 +197,10 @@ export class AiClient {
     const temperature = overrides?.temperature ?? 0.3;
     const maxTokens = overrides?.maxTokens ?? 1024;
 
+    const authValue = this.provider === 'anthropic' ? this.apiKey : `Bearer ${this.apiKey}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      [def.authHeader]: this.apiKey,
+      [def.authHeader]: authValue,
     };
     if (def.needsAnthropicVersion) {
       headers['anthropic-version'] = '2023-06-01';

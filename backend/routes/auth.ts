@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { login, register, getMe, getAllUsers, updateUserRole, deleteUser, updateProfile, changePassword, exportUserData } from '../controllers/authController.js';
+import { login, register, getMe, getAllUsers, updateUserRole, deleteUser, updateProfile, changePassword, exportUserData, logout } from '../controllers/authController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import { loginLimiter, registerLimiter, passwordChangeLimiter } from '../utils/rateLimit.js';
 
@@ -10,6 +10,9 @@ router.post('/register', registerLimiter, register);
 
 // POST /api/auth/login (Public) — rate-limited
 router.post('/login', loginLimiter, login);
+
+// POST /api/auth/logout (Protected) — revokes the JWT carried by the request
+router.post('/logout', protect, logout);
 
 // GET /api/auth/me (Protected)
 // Uses the 'protect' middleware to verify the token before fetching the user's profile

@@ -48,6 +48,14 @@ export interface Post {
   escalationStatus?: 'none' | 'escalated' | 'resolved' | 'dismissed';
   escalatedAt?: string | null;
   escalationReason?: string | null;
+  // Knowledge lifecycle
+  lifecycle?: {
+    status: string;
+    statusHistory?: Array<{ from: string; to: string; changedAt: string; note?: string }>;
+    aiGeneratedFaq?: unknown;
+  };
+  // Bookmark count (array of user IDs)
+  bookmarks?: (string | { _id?: string })[];
   [key: string]: unknown;
 }
 

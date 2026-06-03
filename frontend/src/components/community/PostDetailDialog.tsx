@@ -3,6 +3,7 @@ import Avatar from '../ui/Avatar';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import api from '../../utils/api';
+import { buildTransformedUrl } from '../../hooks/useCloudinaryUpload';
 import type { Post, Comment } from '../../types/ui';
 
 const formatDate = (d: string | undefined) =>
@@ -90,12 +91,12 @@ export default function PostDetailDialog({ post: initialPost, onClose, currentUs
 
     try {
       const res = await api.post<{ upvotedByMe: boolean }>(`/community/${post._id}/upvote`);
-      // Sync with server state
+      // Sync with server state — use the already-updated post.upvotes, not stale previousUpvotes
       setPost((prev) => ({
         ...prev,
         upvotes: res.data.upvotedByMe
-          ? [...previousUpvotes.filter((u) => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId), currentUserId]
-          : previousUpvotes.filter((u) => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId),
+          ? [...(prev.upvotes || []).filter((u) => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId), currentUserId]
+          : (prev.upvotes || []).filter((u) => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId),
       }));
     } catch (e) {
       // Rollback on failure
@@ -241,6 +242,32 @@ export default function PostDetailDialog({ post: initialPost, onClose, currentUs
         <div className="overflow-y-auto flex-1">
           <div className="px-6 py-4">
             <p className="text-sm text-ink/70 leading-relaxed">{post.body}</p>
+
+            {/* Image attachments — full-size grid */}
+            {(() => {
+              const atts = (post as Post & { attachments?: { url: string; publicId: string }[] }).attachments;
+              if (!Array.isArray(atts) || atts.length === 0) return null;
+              return (
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {atts.map((a) => (
+                    <a
+                      key={a.publicId}
+                      href={a.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-xl overflow-hidden border border-border bg-mist hover:opacity-90 transition-opacity"
+                    >
+                      <img
+                        src={buildTransformedUrl(a.url, 'w_1200,c_limit,q_auto,f_auto')}
+                        alt="attachment"
+                        className="w-full h-auto object-cover"
+                        loading="lazy"
+                      />
+                    </a>
+                  ))}
+                </div>
+              );
+            })()}
 
           {/* Tags */}
           {post.tags && post.tags.length > 0 && (
@@ -687,6 +714,34 @@ export default function PostDetailDialog({ post: initialPost, onClose, currentUs
                                 title={comment.verified ? 'Unverify answer' : 'Mark as verified answer'}
                               >
                                 {comment.verified ? 'Unverify' : '✅ Verify'}
+                              </button>
+                            )}
+                            {/* Accept as Answer — only visible to post author on unanswered posts */}
+                            {!isAnswered && currentUserId && post.author?._id === currentUserId && (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const res = await api.patch<{ post: Post }>(`/community/${post._id}/comments/${comment._id}/accept-answer`);
+                                    setPost(res.data.post);
+                                    // Show success feedback
+                                    const banner = document.createElement('div');
+                                    banner.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] px-5 py-3 bg-success-light border border-success/20 rounded-xl text-sm text-success font-medium shadow-lg';
+                                    banner.textContent = 'Answer accepted!';
+                                    document.body.appendChild(banner);
+                                    setTimeout(() => banner.remove(), 3000);
+                                  } catch (e) {
+                                    const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Could not accept answer.';
+                                    setActionError(msg);
+                                    setTimeout(() => setActionError(null), 4000);
+                                  }
+                                }}
+                                className="ml-auto text-[10px] text-success hover:text-success/80 font-medium transition-colors flex items-center gap-0.5"
+                                title="Accept this comment as the official answer"
+                              >
+                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M1.5 5.5L4 8L8.5 2"/>
+                                </svg>
+                                Accept
                               </button>
                             )}
                           </div>

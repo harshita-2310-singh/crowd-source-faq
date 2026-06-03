@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../utils/api';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import Avatar from '../components/ui/Avatar';
+import { useCloudinaryUpload } from '../hooks/useCloudinaryUpload';
 import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 
@@ -31,13 +33,71 @@ export default function AccountPage() {
     }
   }, [user]);
 
+  // ─── Avatar upload (Cloudinary) ──────────────────────────────────
+  const { upload: uploadAvatar, uploading: avatarUploading, error: avatarUploadError } = useCloudinaryUpload('avatar');
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const [avatarError, setAvatarError] = useState('');
+  const [avatarSuccess, setAvatarSuccess] = useState('');
+  const handleAvatarPick = () => avatarFileInputRef.current?.click();
+  const handleAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input so picking the same file twice still fires onChange.
+    e.target.value = '';
+    if (!file) return;
+    setAvatarError('');
+    setAvatarSuccess('');
+    try {
+      const asset = await uploadAvatar(file);
+      const res = await api.patch<{ user: { id: string; name: string; email: string; role: string; avatar: { url: string; publicId: string } } }>('/auth/profile', {
+        avatar: { url: asset.url, publicId: asset.publicId },
+      });
+      // Persist on localStorage so the navbar avatar updates on next render
+      // (the auth context reads from localStorage on every page load).
+      const stored = localStorage.getItem('yaksha_user');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        localStorage.setItem(
+          'yaksha_user',
+          JSON.stringify({ ...parsed, avatar: res.data.user.avatar })
+        );
+      }
+      setAvatarSuccess('Profile picture updated.');
+      // Force a reload so the auth context picks up the new avatar — same
+      // pattern as the existing name/email save flow.
+      setTimeout(() => window.location.reload(), 600);
+    } catch (err: unknown) {
+      setAvatarError((err as Error).message || 'Failed to upload avatar.');
+    }
+  };
+  const handleAvatarRemove = async () => {
+    setAvatarError('');
+    setAvatarSuccess('');
+    try {
+      const res = await api.patch<{ user: { id: string; name: string; email: string; role: string; avatar: { url: string; publicId: string } | null } }>('/auth/profile', {
+        avatar: null,
+      });
+      const stored = localStorage.getItem('yaksha_user');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        localStorage.setItem(
+          'yaksha_user',
+          JSON.stringify({ ...parsed, avatar: res.data.user.avatar })
+        );
+      }
+      setAvatarSuccess('Profile picture removed.');
+      setTimeout(() => window.location.reload(), 600);
+    } catch (err: unknown) {
+      setAvatarError((err as Error).message || 'Failed to remove avatar.');
+    }
+  };
+
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileLoading(true);
     setProfileError('');
     setProfileSuccess('');
     try {
-      const res = await api.patch<{ user: { id: string; name: string; email: string; role: string } }>('/auth/profile', {
+      const res = await api.patch<{ user: { id: string; name: string; email: string; role: string; avatar?: { url: string; publicId: string } } }>('/auth/profile', {
         name: profileForm.name.trim(),
         email: profileForm.email.trim(),
       });
@@ -103,6 +163,14 @@ export default function AccountPage() {
   const [zoomLoading, setZoomLoading] = useState(false);
   const [zoomError, setZoomError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [transcriptUploading, setTranscriptUploading] = useState(false);
+  const [transcriptMsg, setTranscriptMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [transcriptMeetingId, setTranscriptMeetingId] = useState<string | null>(null);
+  const [transcriptProgress, setTranscriptProgress] = useState<{ stage: string; percent: number; message: string } | null>(null);
+  const [transcriptSelectedFile, setTranscriptSelectedFile] = useState<{ file: File; type: 'vtt' | 'txt' } | null>(null);
+  const [showProcessModal, setShowProcessModal] = useState(false);
+  const transcriptRef = useRef<HTMLInputElement>(null);
+  const transcriptPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -158,7 +226,89 @@ export default function AccountPage() {
     }
   };
 
+  const handleTranscriptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset so same file can be re-uploaded
+    if (!file) return;
+    setTranscriptMsg(null);
+    setTranscriptUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      await api.post('/zoom/upload-transcript', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setTranscriptMsg({ type: 'ok', text: `Uploaded "${file.name}" — processing now. Check Admin → Zoom Insights for results.` });
+      if (transcriptRef.current) transcriptRef.current.value = '';
+    } catch (err: unknown) {
+      setTranscriptMsg({ type: 'err', text: (err as Error).message || 'Upload failed. Try again.' });
+    } finally {
+      setTranscriptUploading(false);
+    }
+  };
+
   const handleLogout = () => { logout(); navigate('/'); };
+
+  // Poll progress while a transcript is processing
+  useEffect(() => {
+    if (!transcriptMeetingId) return;
+    const poll = () => {
+      api.get<{ stage: string; percent: number; message: string; status: string }>(
+        `/zoom/meetings/${transcriptMeetingId}/progress`
+      ).then(res => {
+        setTranscriptProgress(res.data);
+        if (res.data.status === 'completed' || res.data.status === 'done' || res.data.stage === 'done' || res.data.stage === 'failed') {
+          setTranscriptMeetingId(null);
+          if (res.data.stage === 'failed') {
+            setTranscriptMsg({ type: 'err', text: res.data.message || 'Processing failed.' });
+          } else {
+            setTranscriptMsg({ type: 'ok', text: `Processing done — ${res.data.message}` });
+          }
+        } else {
+          transcriptPollRef.current = setTimeout(poll, 2000);
+        }
+      }).catch(() => {
+        transcriptPollRef.current = setTimeout(poll, 3000);
+      });
+    };
+    poll();
+    return () => { if (transcriptPollRef.current) clearTimeout(transcriptPollRef.current); };
+  }, [transcriptMeetingId]);
+
+  // Handle Process button — show confirmation modal
+  const handleTranscriptProcess = useCallback(() => {
+    if (!transcriptSelectedFile) return;
+    const topic = (document.getElementById('transcript-topic') as HTMLInputElement)?.value?.trim();
+    if (!topic) { setTranscriptMsg({ type: 'err', text: 'Add a meeting topic first.' }); return; }
+    setShowProcessModal(true);
+  }, [transcriptSelectedFile]);
+
+  // Confirmed in modal — start upload
+  const confirmTranscriptProcess = useCallback(() => {
+    if (!transcriptSelectedFile) return;
+    const topic = (document.getElementById('transcript-topic') as HTMLInputElement)?.value?.trim();
+    setShowProcessModal(false);
+    setTranscriptMsg(null);
+    setTranscriptProgress({ stage: 'queued', percent: 0, message: 'Uploading…' });
+    setTranscriptUploading(true);
+    const form = new FormData();
+    form.append('file', transcriptSelectedFile.file);
+    form.append('meetingTopic', topic!);
+    api.post('/zoom/upload-transcript', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then(res => { setTranscriptMeetingId(res.data.meetingId); })
+      .catch((err) => {
+        setTranscriptMsg({ type: 'err', text: (err as Error).message || 'Upload failed.' });
+        setTranscriptUploading(false);
+      });
+  }, [transcriptSelectedFile]);
+
+  // Cancel selected file
+  const handleTranscriptCancel = useCallback(() => {
+    setTranscriptSelectedFile(null);
+    setTranscriptProgress(null);
+    setTranscriptMsg(null);
+    if (transcriptRef.current) transcriptRef.current.value = '';
+  }, []);
 
   const zoomConnectedAt = zoomStatus?.connectedAt
     ? new Date(zoomStatus.connectedAt).toLocaleDateString()
@@ -211,16 +361,55 @@ export default function AccountPage() {
           </div>
 
           {!editingProfile ? (
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center text-accent font-bold text-lg">
-                {user?.name?.[0]?.toUpperCase() ?? '?'}
+            <>
+              <div className="flex items-center gap-4">
+                <Avatar
+                  name={user?.name}
+                  src={user?.avatar?.url}
+                  size="lg"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-ink truncate">{user?.name ?? 'Unknown'}</p>
+                  <p className="text-sm text-ink-faint truncate">{user?.email ?? ''}</p>
+                  <p className="text-xs text-ink-faint mt-0.5 capitalize">{user?.role ?? 'user'}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1.5">
+                  <input
+                    ref={avatarFileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={handleAvatarFile}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={handleAvatarPick}
+                    disabled={avatarUploading}
+                    className="text-xs font-semibold text-accent hover:text-accent-hover transition-colors disabled:opacity-50"
+                  >
+                    {avatarUploading ? 'Uploading…' : user?.avatar?.url ? 'Change photo' : 'Add photo'}
+                  </button>
+                  {user?.avatar?.url && (
+                    <button
+                      onClick={handleAvatarRemove}
+                      className="text-[11px] text-ink-faint hover:text-danger transition-colors"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
-              <div>
-                <p className="font-medium text-ink">{user?.name ?? 'Unknown'}</p>
-                <p className="text-sm text-ink-faint">{user?.email ?? ''}</p>
-                <p className="text-xs text-ink-faint mt-0.5 capitalize">{user?.role ?? 'user'}</p>
-              </div>
-            </div>
+              {(avatarSuccess || avatarError || avatarUploadError) && (
+                <p
+                  className={`text-xs rounded-xl px-3 py-2 border ${
+                    avatarError || avatarUploadError
+                      ? 'text-danger bg-danger-light border-danger/15'
+                      : 'text-success bg-success-light border-success/15'
+                  }`}
+                >
+                  {avatarError || avatarUploadError || avatarSuccess}
+                </p>
+              )}
+            </>
           ) : (
             <form onSubmit={handleProfileSubmit} className="space-y-3">
               <Input
@@ -416,6 +605,141 @@ export default function AccountPage() {
                 ? 'Your Zoom account is linked. New recordings will auto-process.'
                 : 'You\'ll be redirected to Zoom to authorize access to your recordings.'}
             </p>
+
+            {/* Manual transcript upload — robustness fallback when webhook fails */}
+            {(zoomStatus?.connected || (user?.role === 'admin' || user?.role === 'moderator')) && (
+              <div className="border-t border-border/40 pt-4 space-y-3.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-1 rounded-full bg-ink-faint" />
+                  <p className="text-[11px] text-ink-faint">
+                    If the webhook missed a meeting, upload the transcript manually.
+                  </p>
+                </div>
+
+                {/* Topic field — always required */}
+                <div>
+                  <label className="text-[11px] text-ink-faint mb-1 block">Meeting topic *</label>
+                  <input
+                    id="transcript-topic"
+                    type="text"
+                    placeholder="e.g. Q3 Planning, Sprint Retro, Product Review…"
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-bg text-sm text-ink placeholder-ink-faint/60 focus:outline-none focus:border-accent"
+                  />
+                </div>
+
+                {/* File selector — choose a file first */}
+                {transcriptProgress?.stage === 'done' ? (
+                  // Upload done — show reset
+                  <div className="flex items-center justify-between px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    <span className="text-xs text-emerald-700">Done — {transcriptProgress.message}</span>
+                    <button onClick={handleTranscriptCancel} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-medium underline">Upload another</button>
+                  </div>
+                ) : transcriptMeetingId ? (
+                  // Processing — show progress bar
+                  <div className="px-3 py-2.5 bg-accent/5 border border-accent/20 rounded-xl">
+                    <div className="flex items-center justify-between text-[11px] text-accent font-medium mb-1.5">
+                      <span className="capitalize">{transcriptProgress?.stage}</span>
+                      <span>{transcriptProgress?.percent}%</span>
+                    </div>
+                    <div className="h-1.5 bg-accent/15 rounded-full overflow-hidden mb-1.5">
+                      <div className="h-full bg-accent rounded-full transition-all duration-700 ease-out" style={{ width: `${transcriptProgress?.percent ?? 0}%` }} />
+                    </div>
+                    <p className="text-[10px] text-accent/70">{transcriptProgress?.message}</p>
+                  </div>
+                ) : (
+                  // File selected but not processed yet — show Process / Cancel
+                  <div className="px-3 py-2.5 bg-accent/5 border border-accent/20 rounded-xl space-y-2">
+                    <div className="flex items-center gap-2">
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-accent flex-shrink-0">
+                        <path d="M6 9V3M3 5l3 3 3-3M2 10h8"/>
+                      </svg>
+                      <span className="text-xs text-accent font-medium truncate">{transcriptSelectedFile?.file.name}</span>
+                      <span className="text-[10px] text-accent/50 flex-shrink-0">.{transcriptSelectedFile?.type}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleTranscriptProcess}
+                        disabled={transcriptUploading}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent-hover disabled:opacity-50 transition-colors"
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Process
+                      </button>
+                      <button
+                        onClick={handleTranscriptCancel}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-ink text-xs font-medium hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Hidden file inputs — trigger only on label click */}
+                <div className="grid grid-cols-2 gap-2">
+                  {/* VTT upload */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[11px] font-medium text-ink-faint">Zoom VTT file</span>
+                    <input
+                      ref={transcriptRef}
+                      type="file"
+                      accept=".vtt,text/vtt"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file) return;
+                        setTranscriptSelectedFile({ file, type: 'vtt' });
+                        setTranscriptMsg(null);
+                      }}
+                      className="hidden"
+                      id="transcript-upload-vtt"
+                    />
+                    <label
+                      htmlFor="transcript-upload-vtt"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 hover:border-accent/60 text-xs font-medium cursor-pointer transition-all"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 9V3M3 5l3 3 3-3M2 10h8"/></svg>
+                      Upload .vtt
+                    </label>
+                  </div>
+
+                  {/* TXT upload */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[11px] font-medium text-ink-faint">Plain text file</span>
+                    <input
+                      type="file"
+                      accept=".txt,text/plain"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file) return;
+                        setTranscriptSelectedFile({ file, type: 'txt' });
+                        setTranscriptMsg(null);
+                      }}
+                      className="hidden"
+                      id="transcript-upload-txt"
+                    />
+                    <label
+                      htmlFor="transcript-upload-txt"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 hover:border-accent/60 text-xs font-medium cursor-pointer transition-all"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 9V3M3 5l3 3 3-3M2 10h8"/></svg>
+                      Upload .txt
+                    </label>
+                  </div>
+                </div>
+
+                {transcriptMsg && (
+                  <div className={`text-xs px-3 py-2 rounded-lg ${
+                    transcriptMsg.type === 'ok'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-red-50 text-red-600 border border-red-200'
+                  }`}>
+                    {transcriptMsg.text}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -428,6 +752,43 @@ export default function AccountPage() {
         </button>
 
       </div>
+      {/* Process confirmation modal */}
+      {showProcessModal && transcriptSelectedFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={() => setShowProcessModal(false)} />
+          <div className="relative bg-bg rounded-2xl shadow-2xl border border-border w-full max-w-sm p-6 space-y-4">
+            <div>
+              <h3 className="text-base font-semibold text-ink">Process transcript?</h3>
+              <p className="text-xs text-ink-faint mt-1">This will send the file to AI for FAQ extraction. This action cannot be undone.</p>
+            </div>
+            <div className="bg-cream rounded-xl px-3 py-2 space-y-1">
+              <div className="flex items-center gap-2">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-accent"><path d="M6 9V3M3 5l3 3 3-3M2 10h8"/></svg>
+                <span className="text-xs text-ink font-medium truncate">{transcriptSelectedFile.file.name}</span>
+              </div>
+              <div className="text-[10px] text-ink-faint">
+                Topic: {(document.getElementById('transcript-topic') as HTMLInputElement)?.value || '—'}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={confirmTranscriptProcess}
+                className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition-colors"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Confirm & Process
+              </button>
+              <button
+                onClick={() => setShowProcessModal(false)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-border text-ink text-sm font-medium hover:bg-cream transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Footer />
     </div>
   );

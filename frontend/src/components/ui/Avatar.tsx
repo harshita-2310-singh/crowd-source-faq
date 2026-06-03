@@ -2,6 +2,8 @@ import React from 'react';
 
 interface AvatarProps {
   name?: string;
+  /** Cloudinary URL — when set, renders an <img>. Falls back to initial. */
+  src?: string;
   size?: 'xs' | 'sm' | 'md' | 'lg';
   className?: string;
 }
@@ -22,7 +24,7 @@ const palette = [
   'bg-teal-100 text-teal-700',
 ];
 
-export default function Avatar({ name, size = 'sm', className = '' }: AvatarProps) {
+export default function Avatar({ name, src, size = 'sm', className = '' }: AvatarProps) {
   const initials = (name || 'U')
     .split(' ')
     .map((n) => n[0])
@@ -32,18 +34,35 @@ export default function Avatar({ name, size = 'sm', className = '' }: AvatarProp
 
   const colorIndex = (name?.charCodeAt(0) || 0) % palette.length;
 
+  // When we have a Cloudinary URL, render the image with the initial
+  // pill as a fallback while it loads. This gives us a graceful
+  // no-flash transition even on slow networks.
   return (
     <div
       className={`
         rounded-full flex-shrink-0 flex items-center justify-center
-        font-semibold select-none
+        font-semibold select-none overflow-hidden
         ${sizeClasses[size]}
-        ${palette[colorIndex]}
+        ${src ? 'bg-mist' : palette[colorIndex]}
         ${className}
       `}
       aria-hidden="true"
     >
-      {initials}
+      {src ? (
+        <img
+          src={src}
+          alt={name || 'User avatar'}
+          className="w-full h-full object-cover"
+          loading="lazy"
+          // Hide if Cloudinary errors (e.g. asset deleted). The initials
+          // underneath still show in that case.
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).style.display = 'none';
+          }}
+        />
+      ) : (
+        <span>{initials}</span>
+      )}
     </div>
   );
 }

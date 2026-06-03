@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import api from '../utils/api';
 import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 import { CommunityDoodles } from '../components/ui/PageDoodles';
+import Avatar from '../components/ui/Avatar';
 
 interface LeaderboardEntry {
   rank: number;
@@ -12,25 +13,31 @@ interface LeaderboardEntry {
   reputation: number;
   tier: string;
   badges: number;
+  acceptedAnswers: number;
+  faqContributions: number;
+  trustScore: number;
   joinedAt: string;
+  periodPoints?: number;
 }
 
+type Period = 'weekly' | 'monthly' | 'all';
+
 const TIER_COLORS: Record<string, string> = {
-  newcomer: 'bg-gray-100 text-gray-600',
-  bronze: 'bg-amber-100 text-amber-700',
-  silver: 'bg-slate-100 text-slate-600',
-  gold: 'bg-yellow-100 text-yellow-700',
-  platinum: 'bg-indigo-100 text-indigo-700',
-  legend: 'bg-violet-100 text-violet-700',
+  newcomer:       'bg-gray-100 text-gray-600',
+  contributor:   'bg-amber-100 text-amber-700',
+  helper:        'bg-slate-100 text-slate-600',
+  expert:        'bg-yellow-100 text-yellow-700',
+  champion:      'bg-indigo-100 text-indigo-700',
+  knowledge_master: 'bg-violet-100 text-violet-700',
 };
 
 const TIER_ICONS: Record<string, string> = {
-  newcomer: '🌱',
-  bronze: '🥉',
-  silver: '🥈',
-  gold: '🥇',
-  platinum: '💎',
-  legend: '👑',
+  newcomer:       '🌱',
+  contributor:   '🥉',
+  helper:        '🥈',
+  expert:        '🥇',
+  champion:      '💎',
+  knowledge_master: '👑',
 };
 
 const RANK_STYLES: Record<number, string> = {
@@ -42,12 +49,36 @@ const RANK_STYLES: Record<number, string> = {
 export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [period, setPeriod] = useState<Period>('all');
+
+  // Stable fetcher used by both initial load and the 30s polling loop
+  const fetchLeaderboard = useCallback((isInitial: boolean) => {
+    if (isInitial) setLoading(true);
+    api.get<{ leaderboard: LeaderboardEntry[] }>(`/reputation/leaderboard?period=${period}&limit=50`)
+      .then(r => {
+        setEntries(r.data.leaderboard);
+        setLastUpdated(new Date());
+      })
+      .catch(() => {})
+      .finally(() => { if (isInitial) setLoading(false); });
+  }, [period]);
 
   useEffect(() => {
-    api.get<{ leaderboard: LeaderboardEntry[] }>('/reputation/leaderboard?limit=50')
-      .then(r => setEntries(r.data.leaderboard))
-      .finally(() => setLoading(false));
-  }, []);
+    fetchLeaderboard(true);
+  }, [fetchLeaderboard]);
+
+  // Real-time polling: refresh every 30s so ranks/trust/points stay current.
+  // Pauses when the tab is hidden (browser cuts setInterval) and resumes
+  // immediately on focus.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () => { if (!cancelled) fetchLeaderboard(false); };
+    const id = setInterval(tick, 30_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { cancelled = true; clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
+  }, [fetchLeaderboard]);
 
   return (
     <div className="min-h-screen bg-bg grid-bg relative">
@@ -55,35 +86,75 @@ export default function LeaderboardPage() {
       <Navbar />
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 pt-20 sm:pt-24 pb-12 relative z-10">
-        {/* Header */}
+        {/* Header + period tabs */}
         <div className="mb-6 sm:mb-8 text-center">
           <h1 className="text-2xl sm:text-3xl font-serif text-ink tracking-tight">Community Leaderboard</h1>
           <p className="text-sm text-ink-soft mt-1">Top contributors in the Yaksha community</p>
+          {lastUpdated && (
+            <p className="text-[10px] text-ink-faint mt-1 flex items-center justify-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Live · updated {Math.max(0, Math.round((Date.now() - lastUpdated.getTime()) / 1000))}s ago · refreshes every 30s</span>
+            </p>
+          )}
+          <div className="flex justify-center gap-1 mt-3">
+            {(['weekly', 'monthly', 'all'] as Period[]).map(p => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-4 py-1.5 text-xs rounded-lg border transition-colors ${
+                  period === p
+                    ? 'bg-ink text-white border-ink'
+                    : 'border-border text-ink-faint hover:bg-mist'
+                }`}
+              >
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Podium */}
+        {/* Top 3 Contributors podium — per spec: avatar, badge, reputation, FAQs, accepted answers */}
         {!loading && entries.length >= 3 && (
-          <div className="px-1 pt-2">
-            <div className="grid grid-cols-3 gap-4 mb-8">
-              {[0, 1, 2].map((idx) => {
-                const e = entries[idx];
+          <div className="px-1 pt-2 mb-8">
+            <div className="grid grid-cols-3 gap-3 sm:gap-4 items-end">
+              {/* Reorder: 2nd (idx 0), 1st (idx 1, taller), 3rd (idx 2) for classic podium look */}
+              {[1, 0, 2].map((order) => {
+                const e = entries[order];
                 if (!e) return null;
+                const isFirst = e.rank === 1;
                 return (
-                  <div key={e.userId} className={`relative rounded-2xl border p-5 text-center bg-card shadow-subtle ${e.rank === 1 ? 'border-yellow-400/50 ring-2 ring-yellow-200/40' : 'border-border'}`}>
-                    <div className={`absolute -top-4 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${e.rank === 1 ? 'bg-yellow-400 text-yellow-900' : e.rank === 2 ? 'bg-slate-300 text-slate-800' : 'bg-orange-400 text-orange-900'}`}>
-                      {e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : '🥉'}
+                  <div
+                    key={e.userId}
+                    className={`relative rounded-2xl border p-4 sm:p-5 text-center bg-card shadow-subtle transition-all ${
+                      isFirst ? 'border-yellow-400/60 ring-2 ring-yellow-200/50 sm:scale-105 pb-6 sm:pb-7' : 'border-border'
+                    }`}
+                  >
+                    <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full text-[10px] font-bold shadow-sm ${
+                      isFirst ? 'bg-yellow-400 text-yellow-900' : e.rank === 2 ? 'bg-slate-300 text-slate-800' : 'bg-orange-400 text-orange-900'
+                    }`}>
+                      {isFirst ? '🥇 #1' : e.rank === 2 ? '🥈 #2' : '🥉 #3'}
                     </div>
-                    <p className="text-sm font-semibold text-ink mt-2">{e.name}</p>
-                    <div className="flex justify-center gap-1 mt-1.5 flex-wrap">
+                    <div className="flex justify-center mt-2 mb-2">
+                      <Avatar name={e.name} size={isFirst ? 'lg' : 'md'} />
+                    </div>
+                    <p className="text-sm font-semibold text-ink truncate">{e.name}</p>
+                    <div className="flex justify-center gap-1 mt-1 flex-wrap">
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${TIER_COLORS[e.tier] || 'bg-mist text-ink-soft'}`}>
                         {TIER_ICONS[e.tier] ?? ''} {e.tier}
                       </span>
                     </div>
-                    <p className="text-2xl font-bold text-ink mt-3">{e.points.toLocaleString()}</p>
-                    <p className="text-[10px] text-ink-faint mt-0.5">points</p>
-                    {e.badges > 0 && (
-                      <p className="text-xs text-ink-soft mt-1">🏅 {e.badges} badge{e.badges !== 1 ? 's' : ''}</p>
-                    )}
+                    <p className="text-xl sm:text-2xl font-bold text-ink mt-2">{e.points.toLocaleString()}</p>
+                    <p className="text-[10px] text-ink-faint -mt-0.5">points</p>
+                    <div className="flex justify-around mt-2 pt-2 border-t border-border/40 text-[10px] text-ink-soft">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-ink">{e.acceptedAnswers}</span>
+                        <span className="text-[9px] text-ink-faint">answers</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-ink">{e.faqContributions}</span>
+                        <span className="text-[9px] text-ink-faint">FAQs</span>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -105,6 +176,9 @@ export default function LeaderboardPage() {
                     <th className="px-4 py-3 text-left text-[10px] font-semibold text-ink-soft uppercase tracking-wide w-12">#</th>
                     <th className="px-4 py-3 text-left text-[10px] font-semibold text-ink-soft uppercase tracking-wide">User</th>
                     <th className="px-4 py-3 text-right text-[10px] font-semibold text-ink-soft uppercase tracking-wide">Points</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-semibold text-ink-soft uppercase tracking-wide hidden sm:table-cell">Answers</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-semibold text-ink-soft uppercase tracking-wide hidden sm:table-cell">FAQs</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-semibold text-ink-soft uppercase tracking-wide hidden md:table-cell">Trust</th>
                     <th className="px-4 py-3 text-right text-[10px] font-semibold text-ink-soft uppercase tracking-wide">Tier</th>
                   </tr>
                 </thead>
@@ -123,6 +197,23 @@ export default function LeaderboardPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="text-sm font-semibold text-ink">{e.points.toLocaleString()}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right hidden sm:table-cell">
+                        <span className="text-sm text-ink">{e.acceptedAnswers}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right hidden sm:table-cell">
+                        <span className="text-sm text-ink">{e.faqContributions}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right hidden md:table-cell">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="w-10 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-indigo-500 rounded-full"
+                              style={{ width: `${e.trustScore}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-ink-faint w-6 text-right">{e.trustScore}</span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${TIER_COLORS[e.tier] || 'bg-mist text-ink-soft'}`}>

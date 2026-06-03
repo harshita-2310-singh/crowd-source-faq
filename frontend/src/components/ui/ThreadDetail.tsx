@@ -54,6 +54,19 @@ export interface ThreadPost {
   escalationStatus?: 'none' | 'escalated' | 'resolved' | 'dismissed';
   escalatedAt?: string | null;
   escalationReason?: string | null;
+  // Bookmarks
+  bookmarks?: (string | { _id?: string })[];
+  // Lifecycle pipeline
+  lifecycle?: {
+    status: string;
+    statusHistory?: Array<{
+      from: string;
+      to: string;
+      changedBy?: { name?: string; _id?: string };
+      changedAt: string;
+      note?: string;
+    }>;
+  };
   [key: string]: unknown;
 }
 
@@ -84,6 +97,15 @@ const DEPTH_BARS  = [
   'bg-rose-400',
   'bg-violet-400',
 ];
+
+const LIFECYCLE_CONFIG: Record<string, { label: string; cls: string }> = {
+  open:               { label: 'Open',              cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+  answered:           { label: 'Solved',            cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  community_accepted: { label: 'Community ✓',       cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  ai_validated:       { label: 'AI Validated',      cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+  admin_accepted:     { label: 'Admin Approved',    cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  converted_to_faq:   { label: 'Official FAQ',      cls: 'bg-stone-100 text-stone-700 border-stone-300' },
+};
 
 // Count total descendants recursively
 function countReplies(comment: Comment): number {
@@ -150,16 +172,16 @@ function CommentNode({
     );
 
     api.post<{ upvotedByMe: boolean }>(`/community/${postId}/comments/${comment._id}/upvote`)
-      .then(res => {
-        // Sync with server state
-        setLocalUpvotes(res.data.upvotedByMe
-          ? [...(previousUpvotes.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)), currentUserId]
-          : previousUpvotes.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)
-        );
-        setLocalDownvotes(prev =>
-          prev.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id || u : u)?.toString() !== currentUserId)
-        );
-      })
+          .then(res => {
+            // Sync with server state — use current localUpvotes, not stale captured value
+            setLocalUpvotes(res.data.upvotedByMe
+              ? [...(localUpvotes.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)), currentUserId]
+              : localUpvotes.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)
+            );
+            setLocalDownvotes(prev =>
+              prev.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)
+            );
+          })
       .catch(err => {
         // Rollback
         setLocalUpvotes(previousUpvotes);
@@ -193,10 +215,10 @@ function CommentNode({
         return;
       }
       
-      // Sync with server state
+      // Sync with server state — use current localDownvotes, not stale captured value
       setLocalDownvotes(res.data.downvotedByMe
-        ? [...(previousDownvotes.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)), currentUserId]
-        : previousDownvotes.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)
+        ? [...(localDownvotes.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)), currentUserId]
+        : localDownvotes.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id : u)?.toString() !== currentUserId)
       );
       setLocalUpvotes(prev =>
         prev.filter(u => (typeof u === 'object' ? (u as { _id?: string })._id || u : u)?.toString() !== currentUserId)
@@ -413,6 +435,10 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportDone, setReportDone] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [related, setRelated] = useState<{
+    relatedQuestions: Array<{ _id: string; title: string; tags: string[]; matchScore: number; upvotes: number; url: string }>;
+    similarFaqs:      Array<{ _id: string; title: string; tags: string[]; matchScore: number; upvotes: number; url: string }>;
+  }>({ relatedQuestions: [], similarFaqs: [] });
 
   const isAnswered = post?.status === 'answered';
   const upvoteCount = post?.upvotes?.length ?? 0;
@@ -429,6 +455,14 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
       .then((res) => setPost(res.data))
       .catch(() => setError('Failed to load post.'))
       .finally(() => setLoading(false));
+  }, [postId]);
+
+  // Load related questions + similar FAQs (per spec thread-detail sections)
+  useEffect(() => {
+    if (!postId) return;
+    api.get<typeof related>(`/community/${postId}/related`)
+      .then(r => setRelated(r.data))
+      .catch(() => setRelated({ relatedQuestions: [], similarFaqs: [] }));
   }, [postId]);
 
   useEffect(() => {
@@ -582,6 +616,11 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
           <Badge variant={isAnswered ? 'success' : 'warning'}>
             {isAnswered ? '✓ Answered' : '○ Open'}
           </Badge>
+          {post.lifecycle?.status && LIFECYCLE_CONFIG[post.lifecycle.status] && (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded border text-[10px] font-semibold ${LIFECYCLE_CONFIG[post.lifecycle.status].cls}`}>
+              {LIFECYCLE_CONFIG[post.lifecycle.status].label}
+            </span>
+          )}
         </div>
 
         {/* Scrollable body */}
@@ -674,6 +713,30 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
                   Report
                 </button>
               )}
+              {post.bookmarks != null && (
+                <button
+                  onClick={() => api.post(`/community/${post._id}/bookmark`).then(() => {
+                    setPost(prev => prev ? {
+                      ...prev,
+                      bookmarks: prev.bookmarks?.some(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() === currentUserId)
+                        ? prev.bookmarks.filter(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() !== currentUserId)
+                        : [...(prev.bookmarks ?? []), currentUserId]
+                    } : prev);
+                  }).catch(console.error)}
+                  className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs transition-all ${
+                    post.bookmarks.some(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() === currentUserId)
+                      ? 'bg-accent text-white'
+                      : 'bg-mist text-ink-soft hover:text-accent hover:bg-border'
+                  }`}
+                  title={post.bookmarks.some(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() === currentUserId) ? 'Remove bookmark' : 'Bookmark this'}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill={post.bookmarks.some(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() === currentUserId) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5">
+                    <path d="M2 2.5C2 1.67 2.67 1 3.5 1h5C9.33 1 10 1.67 10 2.5v7.5L7 8.5 4 10V2.5z" strokeLinejoin="round"/>
+                  </svg>
+                  {post.bookmarks.length > 0 && post.bookmarks.length}
+                  {post.bookmarks.some(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() === currentUserId) ? 'Saved' : 'Save'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -742,6 +805,110 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowResolveForm(false)}>Cancel</Button>
               </div>
             </form>
+          )}
+
+          {/* Lifecycle Activity Timeline */}
+          {post.lifecycle?.statusHistory && post.lifecycle.statusHistory.length > 0 && (
+            <div className="px-5 py-4 border-t border-border/30">
+              <h3 className="text-xs font-semibold text-ink-soft uppercase tracking-wider mb-3 flex items-center gap-2">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
+                  <circle cx="6" cy="6" r="5"/>
+                  <path d="M6 3V6.5L8 8" strokeLinecap="round"/>
+                </svg>
+                Lifecycle History
+              </h3>
+              <div className="relative pl-4">
+                {/* Vertical timeline line */}
+                <div className="absolute left-[7px] top-1 bottom-1 w-px bg-border" />
+                <div className="space-y-3">
+                  {post.lifecycle.statusHistory.map((entry, i) => {
+                    const lcTo = LIFECYCLE_CONFIG[entry.to];
+                    return (
+                      <div key={i} className="relative flex items-start gap-3">
+                        {/* Dot */}
+                        <div className="relative z-10 w-3 h-3 rounded-full border-2 border-border bg-card flex-shrink-0 mt-1" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {LIFECYCLE_CONFIG[entry.from] && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${LIFECYCLE_CONFIG[entry.from].cls}`}>
+                                {LIFECYCLE_CONFIG[entry.from].label}
+                              </span>
+                            )}
+                            <span className="text-xs text-ink-faint">→</span>
+                            {lcTo && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${lcTo.cls}`}>
+                                {lcTo.label}
+                              </span>
+                            )}
+                          </div>
+                          {entry.note && <p className="text-xs text-ink-soft mt-0.5">{entry.note}</p>}
+                          <p className="text-[10px] text-ink-faint mt-0.5">
+                            by {entry.changedBy?.name || 'System'} · {formatDate(entry.changedAt)}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Related Questions + Similar FAQs (per spec) */}
+          {(related.relatedQuestions.length > 0 || related.similarFaqs.length > 0) && (
+            <div className="px-5 py-4 border-t border-border/30 grid sm:grid-cols-2 gap-4">
+              {related.relatedQuestions.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-ink-soft uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
+                      <path d="M2 4h6M2 6h6M2 8h4"/>
+                      <path d="M9 3l2 1.5L9 6"/>
+                    </svg>
+                    Related Questions
+                  </h3>
+                  <div className="space-y-1.5">
+                    {related.relatedQuestions.map((q) => (
+                      <button
+                        key={q._id}
+                        onClick={() => window.location.href = q.url}
+                        className="w-full text-left rounded-lg bg-mist/50 hover:bg-mist px-2.5 py-2 transition-colors group"
+                      >
+                        <p className="text-xs text-ink line-clamp-2 group-hover:text-accent transition-colors">{q.title}</p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className="text-[10px] text-ink-faint">{q.upvotes}↑</span>
+                          <span className="text-[10px] text-accent">· {q.matchScore} match</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {related.similarFaqs.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-ink-soft uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
+                      <path d="M2 3h8v6H2z M2 6h8"/>
+                    </svg>
+                    Similar FAQs
+                  </h3>
+                  <div className="space-y-1.5">
+                    {related.similarFaqs.map((f) => (
+                      <button
+                        key={f._id}
+                        onClick={() => window.location.href = f.url}
+                        className="w-full text-left rounded-lg bg-mist/50 hover:bg-mist px-2.5 py-2 transition-colors group"
+                      >
+                        <p className="text-xs text-ink line-clamp-2 group-hover:text-accent transition-colors">{f.title}</p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className="text-[10px] text-ink-faint">{f.upvotes} helpful</span>
+                          <span className="text-[10px] text-accent">· {f.matchScore} match</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Comments — Reddit-style threaded */}

@@ -22,7 +22,12 @@ import {
   getCommunityPendingFAQs,
   promoteFAQ,
   objectToFAQ,
+  getPromotionQueue,
 } from '../services/promotionService.js';
+import {
+  triggerAIReview,
+  triggerAIReviewBatch,
+} from '../controllers/aiPromotionController.js';
 import {
   get2FAStatus,
   setup2FA,
@@ -52,7 +57,8 @@ import {
   resetAiUsage,
   getAiProviders,
   testProvider,
-} from '../controllers/aiController.js';
+  revealApiKey,
+} from '../controllers/aiConfigController.js';
 
 const router = Router();
 
@@ -98,6 +104,7 @@ router.patch('/ai/config',    updateAiConfig);
 router.post('/ai/config/reset-usage', resetAiUsage);
 router.get('/ai/providers',   getAiProviders);
 router.get('/ai/providers/test', testProvider);
+router.get('/ai/config/api-key/:provider', revealApiKey);
 
 router.post('/faq', createFAQ);
 router.post('/faq/approve', approveFAQ);
@@ -106,9 +113,14 @@ router.put('/faq/:id', updateFAQ);
 router.delete('/faq/:id', deleteFAQ);
 router.delete('/community/:id', deleteCommunityPost);
 
-// FAQ promotion management (trust levels)
+// FAQ promotion management (trust levels) — from promotionService
 router.get('/faqs/community-pending', getCommunityPendingFAQs);
 router.post('/faqs/:id/promote', promoteFAQ);
 router.post('/faqs/:id/object', objectToFAQ);
+// AI review — from aiController
+router.post('/community-promotions/:id/ai-review', triggerAIReview);
+router.post('/community-promotions/ai-review-batch', triggerAIReviewBatch);
+// Promotion queue — new endpoint showing posts with AI output
+router.get('/community-promotions/queue', getPromotionQueue);
 
 export default router;

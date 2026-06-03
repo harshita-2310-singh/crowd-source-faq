@@ -7,11 +7,24 @@ import { AuthProvider, useAuth, type User } from '@/hooks/useAuth';
 const mockApi = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
+  patch: vi.fn(),
+  put: vi.fn(),
+  delete: vi.fn(),
   interceptors: {
     request: { use: vi.fn() },
     response: { use: vi.fn() },
   },
 }));
+
+// Default-resolve every method so `api.post(...).catch(...)` doesn't blow
+// up on unstubbed calls. Tests still override per-case with mockResolvedValueOnce.
+beforeEach(() => {
+  mockApi.get.mockResolvedValue({ data: null });
+  mockApi.post.mockResolvedValue({ data: null });
+  mockApi.patch.mockResolvedValue({ data: null });
+  mockApi.put.mockResolvedValue({ data: null });
+  mockApi.delete.mockResolvedValue({ data: null });
+});
 
 vi.mock('@/utils/api', () => ({ default: mockApi }));
 

@@ -12,6 +12,7 @@ import {
   type ResultSource,
 } from '../utils/search.js';
 import { searchRequests, searchResultsReturned, searchLogFlushActive, searchLogFlushes } from '../utils/metrics.js';
+import { searchKnowledge } from '../services/knowledgeBase.js';
 
 // Cache configuration: Store up to 500 recent queries for 1 hour to reduce DB/AI loads
 const searchCache = new LRUCache<string, SearchResultItem[]>({
@@ -26,7 +27,7 @@ interface PendingLog {
   query: string;
   resultsCount: number;
   topResultId: Types.ObjectId | null;
-  topResultSource: 'faq' | 'community' | null;
+  topResultSource: 'faq' | 'community' | 'knowledge' | null;
   createdAt: Date;
 }
 
@@ -129,6 +130,11 @@ const runVectorSearch = async (collectionName: string, queryEmbedding: number[],
           unhelpfulVotes: 1,
           score: { $meta: 'vectorSearchScore' }, // Expose similarity score
           trustLevel: 1,
+          // Freshness system — required for the public FreshnessBadge
+          reviewStatus: 1,
+          lastVerifiedDate: 1,
+          reviewIntervalDays: 1,
+          freshnessTier: 1,
         },
       },
       // Boost score based on trust level: high (official) > expert (admin_approved) > medium (community_approved) > low
@@ -216,6 +222,41 @@ export const semanticSearch = async (req: Request, res: Response): Promise<void>
 
     // 5. Apply threshold filters to remove irrelevant garbage results
     const filtered = applySearchThreshold(merged).slice(0, 5); // Return only the absolute top 5 results
+
+    // 5b. TranscriptKnowledge fallback — if FAQ + Community returned nothing,
+    // try the auto-extracted Zoom knowledge base. Zero-human data path:
+    // Zoom transcript → processZoomMeetingForKnowledge → inline embed →
+    // available for this exact query. Tagged source: 'knowledge' so the
+    // frontend can render with a "from meeting" badge.
+    if (filtered.length === 0) {
+      try {
+        const knowledgeHits = await searchKnowledge(query, 5);
+        if (knowledgeHits.length > 0) {
+          const knowledgeResults: SearchResultItem[] = knowledgeHits.map((k) => ({
+            _id: new Types.ObjectId(k._id),
+            question: k.question,
+            answer: k.answer,
+            source: 'knowledge' as ResultSource,
+            score: k.score,
+          }));
+          const final = knowledgeResults.slice(0, 5);
+          searchCache.set(normalizedQuery, final);
+          await setCachedResults(normalizedQuery, final);
+          bufferSearchLog({
+            query,
+            resultsCount: final.length,
+            topResultId: (final[0]?._id as Types.ObjectId) ?? null,
+            topResultSource: 'knowledge',
+          });
+          searchRequests.inc({ source: 'fresh', cached: 'false' });
+          searchResultsReturned.observe({ source: 'fresh' }, final.length);
+          res.json({ results: final, total: final.length, cached: false });
+          return;
+        }
+      } catch (e) {
+        logger.warn('search.knowledge.fallback.failed', { error: (e as Error).message });
+      }
+    }
 
     // 6. Save to both Redis (shared) and LRU (process-local)
     searchCache.set(normalizedQuery, filtered);

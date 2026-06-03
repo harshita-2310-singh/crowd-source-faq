@@ -10,7 +10,9 @@
  */
 
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import User from '../models/User.js';
+import { ZoomMeeting } from '../models/ZoomMeeting.js';
 import { buildZoomAuthUrl, exchangeCodeForTokens, getZoomUserId } from '../utils/zoomOAuth.js';
 import { encrypt } from '../utils/crypto.js';
 import { zoomOAuthCircuit, CircuitOpenError } from '../utils/circuitBreaker.js';
@@ -22,6 +24,9 @@ import { logger } from '../utils/logger.js';
 /**
  * GET /api/zoom/auth/connect
  * Returns the Zoom OAuth authorization URL for the frontend to redirect to.
+ *
+ * Passes the request so the redirect URI is built from the actual request host
+ * (so it works behind ngrok / reverse proxies / different deploy URLs).
  */
 export function connectZoom(req: Request, res: Response): void {
   const userId = req.user!._id.toString();
@@ -30,7 +35,10 @@ export function connectZoom(req: Request, res: Response): void {
     return;
   }
 
-  const authUrl = buildZoomAuthUrl(userId);
+  const authUrl = buildZoomAuthUrl(userId, {
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    protocol: req.protocol,
+  });
   logger.info(`[Zoom OAuth] User ${userId} initiated Zoom connect`);
   res.json({ authUrl });
 }
@@ -120,6 +128,14 @@ export async function callbackZoom(req: Request, res: Response): Promise<void> {
 
     logger.info(`[Zoom OAuth] User ${userId} connected — updated doc: zoomConnected=${updated?.zoomConnected}, zoomUserId=${updated?.zoomUserId}`);
 
+    // Non-blocking backfill: pull past recordings so nothing is missed
+    if (updated?.zoomConnected) {
+      const { backfillPastMeetings } = await import('./zoomController.js');
+      backfillPastMeetings(userId, zoomUserId ?? '').catch((err) =>
+        logger.warn(`[Zoom OAuth] Backfill failed for user ${userId}: ${err instanceof Error ? err.message : err}`)
+      );
+    }
+
     // Redirect back to frontend success page
     res.redirect(`${process.env.CLIENT_URL ?? 'http://localhost:5173'}/account?zoom_connected=1`);
   } catch (err) {
@@ -160,6 +176,7 @@ export async function disconnectZoom(req: Request, res: Response): Promise<void>
 /**
  * GET /api/zoom/auth/status
  * Returns whether the authenticated user has connected their Zoom account.
+ * Also reports whether the app has Zoom OAuth credentials configured.
  * Does NOT expose encrypted token values.
  */
 export async function zoomStatus(req: Request, res: Response): Promise<void> {
@@ -171,9 +188,89 @@ export async function zoomStatus(req: Request, res: Response): Promise<void> {
 
   const user = await User.findById(userId).select('zoomConnected zoomConnectedAt zoomUserId zoomAccessToken');
   logger.info(`[Zoom OAuth] zoomStatus for userId=${userId}: zoomConnected=${user?.zoomConnected}, hasEncryptedToken=${!!user?.zoomAccessToken}`);
+
+  const hasCredentials = !!(process.env.ZOOM_CLIENT_ID && process.env.ZOOM_CLIENT_SECRET);
+
   res.json({
     connected:   user?.zoomConnected ?? false,
     connectedAt: user?.zoomConnectedAt,
     zoomUserId:  user?.zoomUserId,
+    hasCredentials,
   });
+}
+
+// ─── Admin Backfill Trigger ───────────────────────────────────────────────────
+
+/**
+ * POST /api/zoom/auth/backfill
+ * Admin-only: trigger a manual backfill for a specific user.
+ * Body: { targetUserId?: string; fromDate?: string; toDate?: string }
+ */
+export async function adminBackfill(req: Request, res: Response): Promise<void> {
+  const userId = (req as Request & { user?: { id: string } }).user?.id;
+  if (!userId) { res.status(401).json({ message: 'Not authorized' }); return; }
+  const { targetUserId, fromDate, toDate } = req.body as {
+    targetUserId?: string;
+    fromDate?: string;
+    toDate?: string;
+  };
+
+  const target = targetUserId ?? userId;
+  const targetUser = await User.findById(target).select('zoomConnected zoomUserId');
+  if (!targetUser?.zoomConnected) {
+    res.status(400).json({ message: 'Target user has not connected Zoom' }); return;
+  }
+
+  if (fromDate || toDate) {
+    const { getUserZoomToken, zoomApiAsUser } = await import('../utils/zoomOAuth.js');
+    const token = await getUserZoomToken(target);
+    const from  = fromDate ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const to    = toDate   ?? new Date().toISOString().split('T')[0];
+    const data  = await zoomApiAsUser<{ meetings: any[] }>(target,
+      `/users/me/recordings?from=${from}&to=${to}&page_size=300`);
+    const meetings = data.meetings ?? [];
+
+    const existingIds = new Set(
+      await ZoomMeeting.find({ zoomMeetingId: { $in: meetings.map((m: any) => m.id) } })
+        .select('zoomMeetingId').lean().then((docs: any[]) => docs.map((d: any) => d.zoomMeetingId))
+    );
+
+    const { processTranscriptForUser } = await import('./zoomController.js');
+    const { ZoomMeeting: ZM } = await import('../models/ZoomMeeting.js');
+    const { sanitizeText } = await import('../utils/sanitize.js');
+
+    let queued = 0;
+    for (const meeting of meetings) {
+      if (existingIds.has(meeting.id)) continue;
+      const transcriptFile = (meeting.recordingFiles ?? []).find(
+        (f: any) => f.fileType === 'TRANSCRIPT' || f.fileType === 'CC'
+      );
+      const downloadUrl = transcriptFile?.downloadUrl;
+      if (!downloadUrl) continue;
+
+      await ZM.create({
+        userId: new mongoose.Types.ObjectId(target),
+        zoomMeetingId: meeting.id,
+        topic: sanitizeText(meeting.topic ?? 'Untitled Meeting'),
+        startTime: meeting.startTime ? new Date(meeting.startTime) : new Date(),
+        duration: meeting.duration,
+        rawTranscriptUrl: downloadUrl,
+        status: 'pending',
+        sourcing: 'webhook',
+        sourceType: 'zoom',
+      });
+      processTranscriptForUser(meeting, target).catch((err: any) =>
+        logger.error(`[Admin Backfill] Failed meeting ${meeting.id}: ${err.message}`)
+      );
+      queued++;
+    }
+    res.json({ message: `Backfill complete — queued ${queued} meetings`, total: meetings.length });
+    return;
+  }
+
+  const { backfillPastMeetings } = await import('./zoomController.js');
+  backfillPastMeetings(target, targetUser.zoomUserId ?? '').catch((err) =>
+    logger.warn(`[Admin Backfill] Failed for user ${target}: ${err instanceof Error ? err.message : err}`)
+  );
+  res.json({ message: 'Backfill started in background', targetUserId: target });
 }

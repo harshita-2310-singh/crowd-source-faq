@@ -13,9 +13,15 @@ export interface FAQItem {
   summary?: string;
   source?: 'faq' | 'community';
   trustLevel?: string;
+  sourceType?: string;
   status?: string;
   updatedAt?: string;
   createdAt?: string;
+  // Freshness system — required for the public FreshnessBadge
+  reviewStatus?: 'verified' | 'pending_review' | 'update_requested';
+  lastVerifiedDate?: string;
+  reviewIntervalDays?: number;
+  freshnessTier?: 'evergreen' | 'seasonal' | 'volatile';
   [key: string]: unknown;
 }
 
@@ -28,6 +34,22 @@ export function TrustBadge({ level }: { level?: string }) {
     low:    { label: 'Community', class: 'bg-amber-50 text-amber-700 border-amber-200' },
   };
   const cfg = map[level];
+  if (!cfg) return null;
+  return (
+    <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded border font-medium ${cfg.class}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
+export function SourceBadge({ sourceType }: { sourceType?: string }) {
+  if (!sourceType || sourceType === 'manual') return null;
+  const map: Record<string, { label: string; class: string }> = {
+    community_promotion: { label: 'From Community', class: 'bg-purple-50 text-purple-700 border-purple-200' },
+    zoom_transcript:     { label: 'From Meetings',  class: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+    expert_verified:     { label: 'Expert Verified', class: 'bg-blue-50 text-blue-700 border-blue-200' },
+  };
+  const cfg = map[sourceType];
   if (!cfg) return null;
   return (
     <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded border font-medium ${cfg.class}`}>

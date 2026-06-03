@@ -151,6 +151,19 @@ export default function AdminZoomInsights() {
     }
   };
 
+  const handleConvertToFAQ = async (id: string) => {
+    setActionLoading(id);
+    try {
+      await adminApi.post<{ faq: { _id: string } }>(`/zoom/insights/${id}/convert-to-faq`);
+      fetchInsights();
+      fetchStats();
+    } catch {
+      // handle silently
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const STATUS_TABS: { key: StatusFilter; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'pending_review', label: 'Pending Review' },
@@ -305,7 +318,9 @@ export default function AdminZoomInsights() {
                       )}
                       {insight.status === 'approved' && insight.type === 'FAQ' && !insight.publishedFaqId && (
                         <button
-                          className="px-3 py-1.5 rounded text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors"
+                          onClick={() => handleConvertToFAQ(insight._id)}
+                          disabled={actionLoading === insight._id}
+                          className="px-3 py-1.5 rounded text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors disabled:opacity-50"
                         >
                           Publish as FAQ
                         </button>

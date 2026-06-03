@@ -2,12 +2,21 @@
  * notificationDispatcher
  *
  * Text-bank driven notification factory.
- * Selects a random message string from the curated pool for the given event type,
- * persists it to MongoDB, and optionally emits a Socket.io event.
+ * Selects a random message string from the curated pool for the given event type
+ * and persists it to MongoDB. Clients poll /api/notifications/tea (30s) and
+ * /api/notifications to read state — there is no real-time push today.
  */
 
 import { Types } from 'mongoose';
 import Notification, { NotificationType } from '../models/Notification.js';
+
+// Note: a previous version of this file attempted to emit a real-time Socket.io
+// event after persisting a notification. Socket.io is not installed and no
+// server is initialized anywhere, so the emit was a no-op. If real-time
+// notifications are ever needed, install `socket.io`, create a Server in
+// server.ts after `app.listen`, and reintroduce the emit here. For now the
+// notification is persisted to MongoDB only — clients poll
+// /api/notifications/tea (30s) and /api/notifications to read state.
 
 // ─── Text Bank ─────────────────────────────────────────────────────────────────
 
@@ -46,25 +55,27 @@ const notificationTextBank: Record<string, string[]> = {
     '👑 Status: Closed. Your answer was verified as the ultimate working solution.',
     '👑 We have a winner! The author picked your solution out of the entire crowd.',
   ],
+  post_resolved: [
+    '✅ Your question just got answered. Tap to see the response.',
+    '✅ Solved! A teammate or admin has closed the loop on your post.',
+    '✅ Your community post is now answered — check out the solution.',
+    '✅ Mystery solved. Your post has a verified answer waiting.',
+    '✅ Resolution found! Your question just got the answer it needed.',
+  ],
+  faq_match_found: [
+    '💡 Heads up — a similar question already has an answer in the FAQ.',
+    '💡 FYI: the knowledge base has a relevant FAQ for this topic.',
+    '💡 Look here — a related FAQ was found that might help.',
+    '💡 Pro tip: a matching FAQ is sitting in the knowledge base.',
+    '💡 Quick match: we found an existing FAQ that covers your topic.',
+  ],
 };
-
-// ─── Socket.io broadcast (lazy singleton) ────────────────────────────────────
-// Assumes server.ts exports io on the global so it can be accessed outside the
-// Express request context. Example init in server.ts:
-//
-//   import { Server } from 'socket.io';
-//   const io = new Server(httpServer, { cors: … });
-//   (global as any)._io = io;
-function getSocketServer(): any {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-  return (global as unknown as { _io?: unknown })._io ?? null;
-}
 
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 interface DispatchOptions {
   recipientId: Types.ObjectId;
-  eventType: Exclude<NotificationType, 'post_resolved' | 'comment_replied' | 'faq_match_found' | 'mention' | 'expert_request'>;
+  eventType: Exclude<NotificationType, 'comment_replied' | 'mention' | 'expert_request'>;
   /** Navigable URL — e.g. /community?post=<id> or /faq/<faqId> */
   link: string;
   /**
@@ -97,10 +108,12 @@ export const dispatchNotification = async ({
     upvote: 'Upvote Received',
     downvote: 'Downvote Received',
     accepted_answer: 'Answer Accepted',
+    post_resolved: 'Post Resolved',
+    faq_match_found: 'Matching FAQ Found',
   };
 
   try {
-    const doc = await Notification.create({
+    await Notification.create({
       recipient: recipientId,
       type: eventType,
       title: title ?? defaultTitles[eventType] ?? eventType,
@@ -108,19 +121,6 @@ export const dispatchNotification = async ({
       link,
       read: false,
     });
-
-    // ── Real-time broadcast (Socket.io) ────────────────────────────────────
-    // Only emitted when the recipient is currently connected.
-    // Safe to await inside a non-critical path — failure does not affect the
-    // notification save above.
-    try {
-      const io = getSocketServer();
-      if (io) {
-        io.to(recipientId.toString()).emit('notification', doc);
-      }
-    } catch {
-      // Socket errors are non-fatal — swallow so io issues never break the request
-    }
   } catch {
     // Notifications are best-effort; surface errors only in environments
     // where you want alerting (staging / canary). In production the error is

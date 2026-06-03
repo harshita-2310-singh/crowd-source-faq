@@ -54,6 +54,12 @@ interface GroupedFAQs {
     createdAt: Date;
     source?: string;
     trustLevel?: string;
+    sourceType?: string;
+    // Freshness system — required for the public FreshnessBadge
+    reviewStatus?: IFAQ['reviewStatus'];
+    lastVerifiedDate?: IFAQ['lastVerifiedDate'];
+    reviewIntervalDays?: IFAQ['reviewIntervalDays'];
+    freshnessTier?: IFAQ['freshnessTier'];
   }>;
 }
 
@@ -107,6 +113,12 @@ export const getAllFAQs = async (req: Request<{}, {}, {}, GetAllFAQsQuery>, res:
         createdAt: faq.createdAt,
         source: 'faq',
         trustLevel: faq.trustLevel,
+        sourceType: faq.sourceType,
+        // Freshness system — required for the public FreshnessBadge
+        reviewStatus: faq.reviewStatus,
+        lastVerifiedDate: faq.lastVerifiedDate,
+        reviewIntervalDays: faq.reviewIntervalDays,
+        freshnessTier: faq.freshnessTier,
       }));
 
       // Encode the last _id as cursor for the next page
@@ -138,6 +150,12 @@ export const getAllFAQs = async (req: Request<{}, {}, {}, GetAllFAQsQuery>, res:
         createdAt: faq.createdAt,
         source: 'faq',
         trustLevel: faq.trustLevel,
+        sourceType: faq.sourceType,
+        // Freshness system — required for the public FreshnessBadge
+        reviewStatus: faq.reviewStatus,
+        lastVerifiedDate: faq.lastVerifiedDate,
+        reviewIntervalDays: faq.reviewIntervalDays,
+        freshnessTier: faq.freshnessTier,
       });
       return acc;
     }, {});
@@ -186,7 +204,7 @@ export const getRecentFAQs = async (req: Request, res: Response): Promise<void> 
     }
 
     const faqs = await FAQ.find(filter)
-      .select('_id question answer category createdAt sourceType sourceMeetingTopic helpfulVotes')
+      .select('_id question answer category createdAt sourceType sourceMeetingTopic helpfulVotes tags')
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean();
@@ -239,6 +257,11 @@ export const getPaginatedFAQs = async (req: Request<{}, {}, {}, GetPaginatedFAQs
       createdAt: faq.createdAt,
       updatedAt: faq.updatedAt,
       source: 'faq',
+      // Freshness system — required for the public FreshnessBadge
+      reviewStatus: faq.reviewStatus,
+      lastVerifiedDate: faq.lastVerifiedDate,
+      reviewIntervalDays: faq.reviewIntervalDays,
+      freshnessTier: faq.freshnessTier,
     }));
 
     // Encode the last _id as cursor for the next page

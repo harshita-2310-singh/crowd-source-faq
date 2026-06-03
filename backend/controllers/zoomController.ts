@@ -14,9 +14,11 @@
  */
 
 import { Request, Response } from 'express';
+import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { ZoomMeeting, ZoomInsight } from '../models/ZoomMeeting.js';
 import User from '../models/User.js';
-import { downloadTranscriptAsUser } from '../utils/zoomOAuth.js';
+import { downloadTranscriptAsUser, getPastRecordings } from '../utils/zoomOAuth.js';
 import { parseVTT, parseVTTWithSpeakers, isEmptyTranscript } from '../utils/vttParser.js';
 import { processZoomMeetingForKnowledge } from '../services/knowledgeBase.js';
 import { extractInsightsFromTranscript } from '../utils/zoomExtractor.js';
@@ -24,6 +26,25 @@ import { CircuitOpenError } from '../utils/circuitBreaker.js';
 import { sanitizeText } from '../utils/sanitize.js';
 import { logger } from '../utils/logger.js';
 import { getZoomHealth, recordZoomError } from '../utils/zoomHealth.js';
+
+// ─── Webhook Signature Verification ─────────────────────────────────────────
+
+/**
+ * Zoom sends x-zm-signature: "v0=<hmac>" on every POST webhook.
+ * We verify it against ZOOM_WEBHOOK_SECRET_TOKEN if configured.
+ * If env var is missing, verification is skipped (dev mode).
+ */
+function verifyZoomSignature(req: Request): boolean {
+  const secret = process.env['ZOOM_WEBHOOK_SECRET_TOKEN'];
+  if (!secret) {
+    logger.warn('[Zoom] ZOOM_WEBHOOK_SECRET_TOKEN not set — skipping signature verification (dev only)');
+    return true;
+  }
+  const header = req.headers['x-zm-signature'] as string | undefined;
+  if (!header) return false;
+  const expected = 'v0=' + crypto.createHmac('sha256', secret).update(JSON.stringify(req.body)).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
+}
 
 // ─── Webhook Validation ──────────────────────────────────────────────────────
 
@@ -37,9 +58,29 @@ export async function handleZoomChallenge(req: Request, res: Response): Promise<
   res.send(challenge);
 }
 
+// ─── Progress helper ──────────────────────────────────────────────────────────
+
+type ProgressStage = 'queued' | 'parsing' | 'extracting' | 'embedding' | 'storing' | 'done' | 'failed';
+
+/** Lightweight helper to update the meeting's progress field (written to DB each stage) */
+async function setProgress(
+  meetingId: mongoose.Types.ObjectId,
+  stage: ProgressStage,
+  percent: number,
+  message: string,
+): Promise<void> {
+  await ZoomMeeting.findByIdAndUpdate(meetingId, { progress: { stage, percent, message } });
+}
+
 // ─── Webhook Event Handler ────────────────────────────────────────────────────
 
 export async function handleZoomWebhook(req: Request, res: Response): Promise<void> {
+  if (!verifyZoomSignature(req)) {
+    logger.warn('[Zoom] Rejected webhook with invalid signature');
+    res.status(403).json({ message: 'Invalid signature' });
+    return;
+  }
+
   res.status(200).json({ received: true });
 
   const body = req.body as ZoomWebhookPayload;
@@ -54,7 +95,175 @@ export async function handleZoomWebhook(req: Request, res: Response): Promise<vo
   }
 }
 
-// ─── Background Processing (per-user token) ─────────────────────────────────
+// ─── Manual Transcript Upload (robustness fallback) ──────────────────────────
+
+/**
+ * POST /api/zoom/upload-transcript
+ *
+ * Admin fallback when Zoom webhook fails (network outage, rate-limit, Zoom-side
+ * glitch, or missing Zoom OAuth). Accepts a raw .vtt or .txt file upload.
+ *
+ * Body (multipart/form-data):
+ *   file          — .vtt or .txt transcript file
+ *   meetingTopic  — human-readable topic/title for this meeting (optional)
+ *   meetingId     — Zoom meeting ID if known (optional, for deduplication)
+ */
+export async function uploadTranscript(req: Request, res: Response): Promise<void> {
+  if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
+  if (!['admin', 'moderator'].includes((req.user as { role?: string }).role ?? '')) {
+    res.status(403).json({ message: 'Admin or moderator only' }); return;
+  }
+
+  // Support both multipart file upload and JSON raw text
+  const rawFile = (req as Request & { file?: { buffer?: Buffer; originalname?: string } }).file;
+  const body = req.body as { meetingTopic?: string; meetingId?: string; rawText?: string };
+
+  let rawContent: string;
+  let filename: string;
+  let meeting: InstanceType<typeof ZoomMeeting> | undefined;
+
+  if (rawFile) {
+    // Multipart file upload
+    filename = rawFile.originalname ?? 'transcript';
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (ext !== 'vtt' && ext !== 'txt') {
+      res.status(400).json({ message: 'File must be .vtt or .txt' }); return;
+    }
+    rawContent = rawFile.buffer?.toString('utf-8') ?? '';
+  } else if (body.rawText) {
+    // Raw text body (for API clients / curl)
+    rawContent = body.rawText;
+    filename = 'transcript.txt';
+  } else {
+    res.status(400).json({ message: 'Provide a .vtt/.txt file or rawText in body' }); return;
+  }
+
+  if (!rawContent.trim()) {
+    res.status(400).json({ message: 'Transcript file is empty' }); return;
+  }
+
+  if (!body.meetingTopic?.trim()) {
+    res.status(400).json({ message: 'Meeting topic is required — please name this meeting.' }); return;
+  }
+  const meetingTopic = body.meetingTopic.trim();
+  const meetingId = body.meetingId?.trim() || `manual-${Date.now()}`;
+
+  try {
+    // Determine how the transcript entered the system
+    let sourcing: 'manual_vtt' | 'manual_txt' | 'manual_raw' = 'manual_txt';
+    let sourceType: 'vtt' | 'txt' | 'manual' = 'txt';
+    if (rawFile) {
+      const ext = filename.split('.').pop()?.toLowerCase();
+      if (ext === 'vtt') { sourcing = 'manual_vtt'; sourceType = 'vtt'; }
+      else               { sourcing = 'manual_txt'; sourceType = 'txt';  }
+    } else {
+      sourcing = 'manual_raw'; sourceType = 'manual';
+    }
+
+    // Create a meeting record so the pipeline is identical to webhook
+    meeting = await ZoomMeeting.create({
+      userId: req.user!._id,
+      zoomMeetingId: meetingId,
+      topic: meetingTopic,
+      startTime: new Date(),
+      status: 'pending',
+      sourcing,
+      sourceType,
+      manualUploadedBy: req.user!._id,
+    });
+
+    // Await the full pipeline — AI extraction + KB embedding + insight creation.
+    // Errors are returned to the user as HTTP 500 with the actual message.
+    // This is acceptable because the file is already in memory (multipart) or
+    // already provided as rawText; there's no additional network I/O here.
+    // Pass sourcing/sourceType from the upload call
+    await processTranscriptPayloadInternal(meeting, rawContent, sourcing,
+      sourcing === 'manual_vtt' ? 'vtt_file' :
+      sourcing === 'manual_txt' ? 'txt_file' : 'manual_upload');
+
+    res.json({
+      message: 'Transcript processed successfully.',
+      meetingId: meeting._id.toString(), // MongoDB _id — use this for progress polling
+      zoomMeetingId: meetingId,          // display string (manual-xxx)
+      topic: meetingTopic,
+    });
+  } catch (err) {
+    logger.error('[Zoom] Manual upload processing failed', { error: (err as Error).message, meetingId });
+    res.status(500).json({
+      message: 'Processing failed: ' + (err as Error).message,
+      meetingId: meeting?._id?.toString(),
+      zoomMeetingId: meetingId,
+    });
+  }
+}
+
+// ─── Auto Backfill (on first connect + periodic) ─────────────────────────────
+
+/**
+ * Called after a user connects their Zoom account via OAuth.
+ * Fetches past cloud recordings (last 90 days) and queues them for processing
+ * so no knowledge is missed from the gap between Zoom connect and webhook setup.
+ *
+ * Runs non-blocking — the user is redirected immediately; backfill continues
+ * in the background without blocking the HTTP response.
+ */
+export async function backfillPastMeetings(userId: string, zoomUserId: string): Promise<void> {
+  try {
+    const meetings = await getPastRecordings(userId);
+
+    if (meetings.length === 0) {
+      logger.info(`[Zoom Backfill] No past recordings found for user ${userId}`);
+      return;
+    }
+
+    logger.info(`[Zoom Backfill] Found ${meetings.length} past recordings for user ${userId}`);
+
+    // Deduplicate against already-processed meetings
+    const existingIds = new Set(
+      await ZoomMeeting.find({ zoomMeetingId: { $in: meetings.map(m => m.id) } })
+        .select('zoomMeetingId')
+        .lean()
+        .then(docs => docs.map((d: any) => d.zoomMeetingId))
+    );
+
+    let queued = 0;
+    for (const meeting of meetings) {
+      if (existingIds.has(meeting.id)) continue; // already processed
+
+      const transcriptFile = (meeting.recordingFiles ?? []).find(
+        (f) => f.fileType === 'TRANSCRIPT' || f.fileType === 'CC'
+      );
+      const downloadUrl = transcriptFile?.downloadUrl;
+      if (!downloadUrl) continue; // no transcript file
+
+      const sanitizedTopic = sanitizeText(meeting.topic ?? 'Untitled Meeting');
+      if (isBlacklisted(sanitizedTopic)) continue;
+
+      const meetingRecord = await ZoomMeeting.create({
+        userId: new mongoose.Types.ObjectId(userId),
+        zoomMeetingId: meeting.id,
+        topic: sanitizedTopic,
+        startTime: meeting.startTime ? new Date(meeting.startTime) : new Date(),
+        duration: meeting.duration,
+        rawTranscriptUrl: downloadUrl,
+        status: 'pending',
+        sourcing: 'webhook',
+        sourceType: 'zoom',
+      });
+
+      processTranscriptForUser(meetingRecord, userId).catch((err) => {
+        logger.error(`[Zoom Backfill] Failed to process meeting ${meeting.id}: ${err instanceof Error ? err.message : err}`);
+      });
+
+      queued++;
+    }
+
+    logger.info(`[Zoom Backfill] Queued ${queued} past meetings for user ${userId}`);
+  } catch (err) {
+    // Non-fatal: backfill failure should not surface as an error to the user
+    logger.error(`[Zoom Backfill] Backfill failed for user ${userId}: ${err instanceof Error ? err.message : err}`);
+  }
+}
 
 async function processRecordingEvent(payload: ZoomWebhookPayload): Promise<void> {
   const obj = payload.payload?.object ?? {};
@@ -115,6 +324,8 @@ async function processRecordingEvent(payload: ZoomWebhookPayload): Promise<void>
     duration,
     rawTranscriptUrl: downloadUrl,
     status: 'pending',
+    sourcing: 'webhook',
+    sourceType: 'zoom',
   });
 
   logger.info(`[Zoom] Created meeting record ${meeting._id} for Zoom ID ${zoomMeetingId} (user: ${user._id})`);
@@ -130,39 +341,64 @@ async function processRecordingEvent(payload: ZoomWebhookPayload): Promise<void>
 }
 
 /**
- * Full pipeline using the authenticated user's token.
+ * Shared pipeline that parses a raw transcript string and stores insights + KB entries.
+ * Used by both the webhook path (download with user token) and the manual upload path
+ * (content already in memory).
+ *
+ * @param meeting    — already-created ZoomMeeting doc
+ * @param rawContent — raw VTT or plain-text transcript content
+ * @param sourcing   — how the transcript entered the system
+ * @param sourceType — carried forward to ZoomInsight as sourceType metadata
  */
-export async function processTranscriptForUser(
+async function processTranscriptPayloadInternal(
   meeting: InstanceType<typeof ZoomMeeting>,
-  userId: string
+  rawContent: string,
+  sourcing: 'webhook' | 'manual_vtt' | 'manual_txt' | 'manual_raw',
+  sourceType: 'zoom_transcript' | 'vtt_file' | 'txt_file' | 'manual_upload'
 ): Promise<void> {
+  // Resolve AI provider once so we can record it on the meeting doc
+  const providerCfg = await import('../utils/aiProvider.js').then(m => m.resolveProviderAsync());
+  const processedBy = `${providerCfg.provider}:${providerCfg.model}`;
+
+  // Update status + progress stage
   await ZoomMeeting.findByIdAndUpdate(meeting._id, {
     status: 'processing',
+    processedBy,
     processingStartedAt: new Date(),
+    progress: { stage: 'parsing', percent: 15, message: 'Parsing transcript…' },
   });
 
   try {
-    // Download using the user's token
-    const rawVtt = await downloadTranscriptAsUser(userId, meeting.rawTranscriptUrl!);
-
-    if (isEmptyTranscript(rawVtt)) {
+    // Empty check (both formats)
+    const { empty, warning } = isEmptyTranscript(rawContent);
+    if (empty) {
       await ZoomMeeting.findByIdAndUpdate(meeting._id, {
         status: 'failed',
         errorMessage: 'Transcript is empty or too short to process.',
         processingCompletedAt: new Date(),
+        progress: { stage: 'failed', percent: 0, message: 'Transcript is empty.' },
       });
       return;
     }
+    if (warning) {
+      logger.warn(`[Zoom] Transcript for meeting ${meeting._id} is short (<50 chars) — processing anyway`);
+    }
 
-    const segments = parseVTTWithSpeakers(rawVtt);
-    const plainText = parseVTT(rawVtt);
+    // Parse: VTT with speakers or plain text
+    const segments = parseVTTWithSpeakers(rawContent);
+    const plainText = segments.map(s => `${s.speaker ? s.speaker + ': ' : ''}${s.text}`).join('\n');
 
     await ZoomMeeting.findByIdAndUpdate(meeting._id, {
       rawTranscriptText: plainText.slice(0, 50_000),
+      progress: { stage: 'extracting', percent: 35, message: `Extracting insights from ${segments.length} segments…` },
     });
 
-    // Extract structured insights
-    const items = await extractInsightsFromTranscript(plainText, meeting.topic);
+    // Extract structured insights (handles both VTT and plain text)
+    const items = await extractInsightsFromTranscript(rawContent, meeting.topic);
+
+    await ZoomMeeting.findByIdAndUpdate(meeting._id, {
+      progress: { stage: 'storing', percent: 65, message: `Storing ${items.length} insights…` },
+    });
 
     const insightDocs = items.map((item) => ({
       meetingId: meeting._id,
@@ -171,6 +407,13 @@ export async function processTranscriptForUser(
       answer_or_content: item.answer_or_content,
       confidence_score: item.confidence_score,
       transcript_snippet: item.transcript_snippet,
+      // ── Provenance ─────────────────────────────────────────────────────────
+      sourcing,
+      processedBy,
+      transcriptTimestamp: item.transcriptTimestamp,
+      speaker: item.speaker,
+      sourceType,
+      sourceTitle: meeting.topic,
       status: 'pending_review' as const,
     }));
 
@@ -182,24 +425,54 @@ export async function processTranscriptForUser(
       status: 'completed',
       insightCount: insightDocs.length,
       processingCompletedAt: new Date(),
+      progress: { stage: 'embedding', percent: 80, message: 'Generating knowledge base embeddings…' },
     });
 
     logger.info(`[Zoom] Processed meeting ${meeting._id}: ${insightDocs.length} insights extracted.`);
 
     // ── Also extract knowledge for the knowledge base (non-blocking) ─────────
-    processZoomMeetingForKnowledge(meeting._id.toString()).catch((err) =>
-      logger.warn(`[Zoom] Knowledge extraction failed for meeting ${meeting._id}: ${err.message}`)
-    );
+    await processZoomMeetingForKnowledge(meeting._id.toString());
+
+    await ZoomMeeting.findByIdAndUpdate(meeting._id, {
+      progress: { stage: 'done', percent: 100, message: `Done — ${insightDocs.length} insights extracted.` },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await ZoomMeeting.findByIdAndUpdate(meeting._id, {
       status: 'failed',
       errorMessage: msg,
       processingCompletedAt: new Date(),
+      progress: { stage: 'failed', percent: 0, message: msg },
     });
     recordZoomError(msg);
     throw err;
   }
+}
+
+// ─── Progress Polling Endpoint ────────────────────────────────────────────────
+
+/**
+ * GET /api/zoom/meetings/:id/progress
+ * Lightweight endpoint the frontend polls to update a meeting's progress bar.
+ * Returns { stage, percent, message } or 404.
+ */
+export async function getMeetingProgress(req: Request, res: Response): Promise<void> {
+  const meeting = await ZoomMeeting.findById(req.params.id).select('progress status');
+  if (!meeting) { res.status(404).json({ message: 'Meeting not found' }); return; }
+  res.json({ stage: meeting.progress?.stage ?? 'queued', percent: meeting.progress?.percent ?? 0, message: meeting.progress?.message ?? 'Queued', status: meeting.status });
+}
+
+/**
+ * Full pipeline using the authenticated user's token (webhook path).
+ * Zoom meeting transcripts arrive via webhook → download → extract.
+ */
+export async function processTranscriptForUser(
+  meeting: InstanceType<typeof ZoomMeeting>,
+  userId: string
+): Promise<void> {
+  // Download using the user's token
+  const rawVtt = await downloadTranscriptAsUser(userId, meeting.rawTranscriptUrl!);
+  await processTranscriptPayloadInternal(meeting, rawVtt, 'webhook', 'zoom_transcript');
 }
 
 // ─── Health Check ────────────────────────────────────────────────────────────
@@ -278,7 +551,8 @@ export async function listInsights(req: Request, res: Response): Promise<void> {
 
   const filter: Record<string, unknown> = {};
   if (req.query.status) filter.status = req.query.status;
-  if (req.query.type) filter.type = req.query.type;
+  if (req.query.type)    filter.type    = req.query.type;
+  if (req.query.meetingId) filter.meetingId = new (await import('mongoose')).default.Types.ObjectId(req.query.meetingId as string);
 
   const [insights, total] = await Promise.all([
     ZoomInsight.find(filter)
@@ -312,6 +586,51 @@ export async function updateInsight(req: Request, res: Response): Promise<void> 
   await insight.save();
   logger.info(`[Zoom Insight] ${status} by user ${(req as Request & { user?: { id: string } }).user?.id}: ${insight._id}`);
   res.json({ insight });
+}
+
+// POST /api/zoom/insights/:id/convert-to-faq — Admin: promote approved insight → official FAQ
+export async function convertInsightToFAQ(req: Request, res: Response): Promise<void> {
+  try {
+    const insight = await ZoomInsight.findById(req.params.id).populate('meetingId');
+    if (!insight) { res.status(404).json({ message: 'Insight not found' }); return; }
+    if (insight.status !== 'approved') { res.status(400).json({ message: 'Only approved insights can be converted to FAQ' }); return; }
+    if (insight.publishedFaqId) { res.status(409).json({ message: 'Insight already promoted to FAQ' }); return; }
+
+    const { default: FAQ } = await import('../models/FAQ.js');
+    const { generateEmbedding } = await import('../utils/embeddings.js');
+
+    const tags: string[] = [];
+    if (insight.question) {
+      const words = insight.question.toLowerCase().match(/\b\w{4,}\b/g) ?? [];
+      tags.push(...words.slice(0, 5));
+    }
+
+    const faq = await FAQ.create({
+      question: insight.question ?? insight.answer_or_content.slice(0, 200),
+      answer: insight.answer_or_content,
+      tags,
+      category: 'Zoom',
+      status: 'approved',
+      sourceType: 'zoom_transcript',
+      sourceMeetingId: (insight.meetingId as any)?._id ?? null,
+      sourceMeetingTopic: (insight.meetingId as any)?.topic ?? null,
+      sourceInsightId: insight._id as mongoose.Types.ObjectId,
+      promotedAt: new Date(),
+    });
+
+    // Async: generate embedding (non-blocking)
+    generateEmbedding(faq.question).then(emb => {
+      if (emb) FAQ.findByIdAndUpdate(faq._id, { embedding: emb }).catch(() => {});
+    }).catch(() => {});
+
+    insight.publishedFaqId = faq._id as mongoose.Types.ObjectId;
+    await insight.save();
+
+    logger.info(`[Zoom] Insight ${insight._id} promoted to FAQ ${faq._id}`);
+    res.json({ faq });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to convert insight to FAQ', error: (err as Error).message });
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

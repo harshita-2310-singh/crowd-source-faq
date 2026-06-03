@@ -1,6 +1,7 @@
 import React from 'react';
 import { FAQItem, getQuestionTitle, getAnswerText, formatDate, getCategoryIcon, formatCategoryName, TrustBadge } from './faqUtils';
 import ReportFAQButton from './ReportFAQButton';
+import FreshnessBadge from '../ui/FreshnessBadge';
 
 interface QuestionDetailProps {
   item: FAQItem;
@@ -69,6 +70,14 @@ export default function QuestionDetail({ item, relatedItems, onBack, onSelectRel
           )}
           {metaDate && (
             <span className="text-[11px] text-ink-faint">Updated {metaDate}</span>
+          )}
+          {item?.source === 'faq' && (
+            <FreshnessBadge
+              reviewStatus={item.reviewStatus}
+              lastVerifiedDate={item.lastVerifiedDate}
+              reviewIntervalDays={item.reviewIntervalDays ?? 0}
+              freshnessTier={item.freshnessTier}
+            />
           )}
         </div>
 

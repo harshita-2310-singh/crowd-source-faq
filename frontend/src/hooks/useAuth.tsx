@@ -7,6 +7,9 @@ export interface User {
   name?: string;
   email?: string;
   role?: string;
+  avatar?: { url: string; publicId: string };
+  // Index signature kept for forward-compat with backend fields the
+  // client hasn't been taught about yet.
   [key: string]: unknown;
 }
 
@@ -90,6 +93,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = (): void => {
+    // Fire-and-forget server-side revocation. If the call fails (offline,
+    // expired token, etc.) we still clear local state — the user is leaving
+    // either way, and the server-side blocklist will catch any reuse within
+    // the JWT's natural expiry window if the call succeeded.
+    const token = localStorage.getItem('yaksha_token');
+    if (token) {
+      api.post('/auth/logout').catch(() => {});
+    }
     localStorage.removeItem('yaksha_token');
     localStorage.removeItem('yaksha_user');
     setUser(null);

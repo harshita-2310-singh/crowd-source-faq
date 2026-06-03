@@ -1,246 +1,103 @@
-# Yaksha FAQ Portal — Full Codebase Audit Report
+# Codebase Issues Audit
 
-> **Audited:** 2026-05-31 | **Scope:** Frontend (React/Vite) + Backend (Express/MongoDB)
+> Generated from full-tree review on 2026-06-03. Severity legend: 🔴 high · 🟡 medium · 🟢 low.
 
----
+## Backend
 
-## 🔴 CRITICAL — Blocking / Security Risks
+### 🔴 B1 — Manual transcript upload missing
+**Where:** No endpoint exists to manually upload a `.vtt` / `.txt` file. The only path is the Zoom webhook + OAuth. If Zoom's webhook fails (network, rate-limit, Zoom-side outage), the data is lost unless the admin re-requests it from Zoom. Spec asks for a robustness fallback.
+**Fix:** Add `POST /api/zoom/upload-transcript` accepting `.vtt` or `.txt` (auth: admin). Runs the same pipeline (parse → extract → embed → store). Wire a UI dropzone under the Zoom card on AccountPage.
 
-### 1. TypeScript Build Fails — `PostDetailDialog.tsx` Has 14 Type Errors
-**File:** `frontend/src/components/community/PostDetailDialog.tsx`  
-**Impact:** Frontend build (`npm run build`) fails. Production deployment broken.  
-**Root Cause:** The `Post` type in `types/ui.ts` defines `comments` as `unknown[]`, but `PostDetailDialog` accesses typed properties (`.upvotes`, `.downvotes`, `._id`) on comment objects without casting correctly. The `.find(cm => cm._id === ...)` calls fail because `cm` is `unknown`.
-
-**Errors include:**
-- `'cm' is of type 'unknown'` (lines 333, 381)
-- `Property 'upvotes' does not exist on type '{}'` (lines 336, 364, 365)
-- `Property 'downvotes' does not exist on type '{}'` (lines 384, 427, 428)
-- `Parameter 'u' implicitly has an 'any' type` (lines 336, 364, 365, 384, 427, 428)
-
-**Fix:** Define a proper `Comment` interface in `types/ui.ts` with `_id`, `body`, `author`, `upvotes`, `downvotes`, `replies`, `parentId` fields. Change `Post.comments` from `unknown[]` to `Comment[]`.
-
----
-
-### 2. Zoom OAuth Tokens Stored in Plaintext in MongoDB
-**Files:** `backend/models/User.ts`, `backend/controllers/zoomAuthController.ts`  
-**Impact:** If the database is compromised, attacker gets full Zoom API access for all connected users.  
-**Details:** `zoomAccessToken` and `zoomRefreshToken` are stored as plain `String` fields. They are NOT marked `select: false` on the schema, meaning they are returned in **every** User query that doesn't explicitly exclude them — including `GET /api/auth/users` (admin user list), `getAllPosts` (populates `author`), etc.
-
-**Fix:** 
-1. Mark both fields with `select: false` in the User schema (like `password`)
-2. Encrypt tokens at rest using `crypto.createCipheriv()` before saving
-3. Audit all `User.find()` calls to ensure tokens are never leaked to API responses
-
----
-
-### 3. JWT_SECRET Non-null Assertion (`!`) — Server Crashes if Missing
-**Files:** `backend/middleware/auth.ts:19`, `backend/middleware/admin.ts:22`  
-**Impact:** If `JWT_SECRET` is undefined (e.g., `.env` not loaded properly), `jwt.verify()` throws a cryptic runtime error, not a useful error message.  
-**Details:** Both middleware files use `process.env.JWT_SECRET!` — the `!` silences TypeScript but doesn't prevent runtime failures. The `validateEnv()` function in `server.ts` only runs in development mode (`NODE_ENV !== 'production'`), meaning production deployments skip validation entirely.
-
-**Fix:** 
-1. Move `validateEnv()` outside the development-only block — run it always
-2. Fallback: Add a guard in `auth.ts`/`admin.ts`: `const secret = process.env.JWT_SECRET; if (!secret) return res.status(500).json(...)` 
-
----
-
-### 4. `authorize()` Middleware Returns 500 Instead of 403
-**File:** `backend/middleware/auth.ts:34-42`  
-**Impact:** When a user with insufficient permissions hits a protected route (e.g., a regular user trying to access admin FAQ endpoints), the `authorize()` middleware calls `next(new Error('Insufficient permissions.'))` — which triggers the **global error handler** and returns a `500 Internal Server Error` instead of `403 Forbidden`.
-
-**Fix:** Replace `next(new Error(...))` with `res.status(403).json({ message: 'Insufficient permissions.' }); return;`
-
----
-
-### 5. `validateEnv()` Skipped in Production
-**File:** `backend/server.ts:246-251`  
-**Impact:** When `NODE_ENV=production`, the server skips all environment variable validation and starts without checking for `MONGODB_URI`, `JWT_SECRET`, etc. The server will crash on first request with a cryptic error.
-
-**Fix:** Always call `validateEnv()` regardless of `NODE_ENV`.
-
----
-
-## 🟠 HIGH — Functional Bugs
-
-### 6. `getConfidenceLevel()` Always Returns "Medium" or "High" — Never "Low"
-**File:** `frontend/src/pages/HomePage.tsx:116-123`  
-**Details:** The function has a dead code path:
-```ts
-if (textScore >= 2 || vectorScore >= 0.9) return 'High';
-if (textScore > 0 || vectorScore >= 0.82) return 'Medium';
-return 'Medium'; // ← should be 'Low'
+### 🟡 B2 — VTT speaker detection is fragile
+**Where:** `backend/utils/vttParser.ts:102`
 ```
-The fallback `return 'Medium'` means low-confidence results are indistinguishable from medium ones.
+if (currentSpeaker === '' && /^[A-Za-z]/.test(line) && !line.endsWith('.')) {
+```
+A short declarative line that *isn't* a speaker (e.g. "Yes", "I think") gets misclassified as a speaker. Worse, multi-line speakers ("First\nLast Name") would treat the first line as speaker and the second as text.
+**Fix:** Tighten the heuristic: speaker lines should be ≤4 words AND start with a capital letter AND contain no period/comma inside. Multi-line: allow up to 2 short lines before a long line.
 
-**Fix:** Change the final `return` to `return 'Low'` and add a "Low" style to the `ConfidenceTag` component.
+### 🟡 B3 — `extractSnippet()` ignores timestamps
+**Where:** `backend/utils/vttParser.ts:121` — comment says "We don't have per-segment timestamps here" but the segment is followed by a timestamp on the previous line; the function could store the seconds offset.
+**Fix:** Have `parseVTTWithSpeakers` return `TranscriptSegment & { startSec: number }` so snippets can be time-accurate.
 
----
+### 🟡 B4 — `parseVTT()` re-parses via `parseVTTWithSpeakers()` (double work)
+**Where:** `backend/utils/vttParser.ts:44`
+**Fix:** Cached parse — keep one result. (Minor; ~3ms saved per Zoom meeting. Skip if low priority.)
 
-### 7. Community Posts Filter/Sort State Is UI-Only — Not Sent to Backend
-**File:** `frontend/src/pages/CommunityPage.tsx:31-33, 41-57`  
-**Impact:** The `filter`, `sort`, and `search` state variables are declared and rendered in the UI, but `fetchPosts()` never passes them as query params. The backend always returns all posts sorted by `createdAt: -1` regardless of what the user selects.
+### 🟡 B5 — `convertInsightToFAQ` doesn't carry speaker/snippet metadata
+**Where:** `backend/controllers/zoomController.ts:355` — the new FAQ loses the transcript context that the ZoomInsight had. Admin can't trace back which meeting/section this came from.
+**Fix:** Pass `sourceMeetingId`, `sourceMeetingTopic`, and the AI confidence score through; the FAQ model already supports these fields.
 
-**Fix:** Pass `filter`, `sort`, and `search` as query params in the `api.get('/community', { params: { ... } })` call, and handle them in the backend `getAllPosts` controller.
+### 🟢 B6 — VTT parser has dead code
+**Where:** `backend/utils/vttParser.ts:60-62` — the initial `while (!lines[i].includes('-->'))` skip is reset to 0 immediately. Inefficient, not buggy.
+**Fix:** Delete the dead loop.
 
----
+### 🟢 B7 — Empty-transcript threshold is 50 chars
+**Where:** `backend/utils/vttParser.ts:138` — a 50-char transcript will be silently dropped. Some short Q&A sessions may be valid below this threshold.
+**Fix:** Lower to 30, but log a warning when <50 instead of dropping.
 
-### 8. Admin Login Doesn't Prevent Regular Users from Logging In Before Navigation
-**File:** `frontend/src/admin/pages/AdminLogin.tsx:15-31`  
-**Impact:** When a non-admin user logs in via `/admin/login`, the `login()` function succeeds and stores the JWT token + user in localStorage. Then the role check happens client-side. The user is shown an error message, but their token and session are already saved. If they navigate to `/` manually, they're logged in.
+### 🟢 B8 — `zoomExtractor.ts` doesn't validate that topic is non-empty
+**Where:** If `meetingTopic` is empty string, the LLM prompt becomes "Meeting topic: \n\nTranscript: …" which can confuse smaller models.
+**Fix:** Default to "Untitled meeting" when blank.
 
-**Fix:** Either check the role server-side (dedicated admin login endpoint), or call `logout()` when the role check fails.
+## Frontend
 
----
+### 🟡 F1 — AccountPage has no manual upload UI
+**Where:** `frontend/src/pages/AccountPage.tsx:479-517` — Zoom card shows only Connect/Disconnect. No manual upload.
+**Fix:** Add a file input + dropzone below the Connect button. Show processing state.
 
-### 9. Cache Hash Collision Risk — `hashQuery()` Uses 32-bit Hash
-**File:** `backend/utils/cache.ts:30-38`  
-**Impact:** The cache key uses a simple 32-bit djb2 hash. With 500+ cached queries, hash collisions become likely. Two different queries could return the same cached results — **users would see wrong answers**.
+### 🟡 F2 — No client-side VTT validation
+**Where:** Future: when the upload UI is added, the client should reject files >5MB or wrong MIME type before hitting the server.
+**Fix:** Wire into the upload UI.
 
-**Fix:** Use a proper hash function (e.g., `crypto.createHash('sha256')`) or include the full normalized query string in the cache key.
+### 🟢 F3 — Zoom status doesn't show "last sync"
+**Where:** `zoomStatus.connectedAt` exists but no UI consumes it on the Account page.
+**Fix:** Show "Last sync: <relative time>" if any meetings have been processed.
 
----
+## Data Integrity
 
-### 10. Frontend API Cache Breaks Stale-While-Revalidate for POST `/search`
-**File:** `frontend/src/utils/api.ts:30-33`  
-**Impact:** The adapter caches `POST /search` responses for 1 minute keyed by `method:url:params:data`. If a user searches "offer letter", gets cached results, then an FAQ is updated, they'll see stale results for up to 1 minute — **even if they search again**. The cache key includes the request body, but the cache doesn't get invalidated when FAQ data changes on the server.
+### 🟡 D1 — ZoomInsight documents have no embeddings
+**Where:** `yaksha_zoom_insights` collection — when admins approve, the resulting FAQ gets an embedding (via `convertInsightToFAQ`), but the raw insight has no vector. Approved-but-not-promoted insights are invisible to semantic search.
+**Fix:** Backfill embeddings on insights with `status: 'approved' && embedding: null` (low priority; not in spec).
 
-Additionally, `POST` requests being cached is confusing for developers and violates HTTP semantics.
+### 🟢 D2 — Old zoom insights exist with `confidence_score = 0` and no `transcript_snippet`
+**Where:** `yaksha_zoom_insights` — pre-2026 data has null snippet fields. UI shows "—" for them.
+**Fix:** Acceptable; no action needed.
 
----
+## Infra / Robustness
 
-## 🟡 MEDIUM — Code Quality / UX Issues
+### 🔴 I1 — Single AI extraction in Zoom pipeline
+**Where:** `backend/controllers/zoomController.ts:188-192` — `processZoomMeetingForKnowledge` runs in parallel with `extractInsightsFromTranscript` but if the AI call fails, no retry, no dead-letter queue.
+**Fix:** Add a dead-letter collection (`yaksha_zoom_processing_failures`) for the retry job. (Defer; no retry infra exists yet.)
 
-### 11. `HomePage.tsx` Is 885 Lines — God Component
-**File:** `frontend/src/pages/HomePage.tsx`  
-**Impact:** Extremely hard to maintain. Contains 5+ inlined sub-components (`DoodleElements`, `ConfidenceTag`, `ClockIcon`, `ThumbsUpIcon`, `ThumbsDownIcon`, `ResultItem`, `HistoryModal`) plus the main `HomePage` component. Any change risks breaking something else.
+### 🟡 I2 — Zoom webhook doesn't verify request signature
+**Where:** `backend/routes/zoom.ts:40` — Zoom sends `x-zm-signature` header (HMAC-SHA256) for webhook validation. Code didn't check it.
+**Fix:** `verifyZoomSignature()` checks `x-zm-signature` against `ZOOM_WEBHOOK_SECRET_TOKEN`; skips if env not set (dev mode). ✅ Done.
 
-**Fix:** Extract `ResultItem`, `HistoryModal`, `DoodleElements`, and all SVG icons into separate files.
+### 🟡 I4 — AI auth headers missing `Bearer` prefix for non-Anthropic providers
+**Where:** `backend/utils/zoomExtractor.ts`, `backend/services/knowledgeBase.ts`, `backend/services/aiClient.ts`, `backend/services/rag.ts`, `backend/utils/duplicateDetector.ts` — all sent raw API key as the auth header value (e.g. `Authorization: sk_live_xxx`) instead of `Authorization: Bearer sk_live_xxx`. The proxy (`samagama.in`) requires the `Bearer` prefix, causing all AI calls to return 401. `chatWithProvider` in `aiProvider.ts` was already correct; the other 5 call sites inherited the bug.
+**Fix:** All call sites now construct `authValue = provider === 'anthropic' ? apiKey : \`Bearer ${apiKey}\`` before assigning to the auth header. ✅ Done.
 
----
-
-### 12. SearchBar Auto-Triggers Search on Every Keystroke After Debounce — No Way to Cancel
-**File:** `frontend/src/components/ui/SearchBar.tsx:117-128`  
-**Impact:** Once the user types 3+ characters, a search fires automatically after 600ms. There's no way for the user to just type without triggering a search. This wastes API calls and can be annoying.
-
-**Additional issue:** The `disableSuggestions` prop on the HomePage SearchBar means the suggestion dropdown is disabled, but the auto-search debounce still fires. The intent seems confusing.
-
----
-
-### 13. `Post.comments` Type Is `unknown[]` — Causes Type Errors Everywhere
-**File:** `frontend/src/types/ui.ts:11`  
-**Impact:** Every component that accesses comment properties has to use `as` casts or unsafe access, leading to the 14 TS errors in `PostDetailDialog.tsx` and fragile code elsewhere.
-
-**Fix:** Define a `Comment` type and use it throughout.
-
----
-
-### 14. `CommunityPage.tsx` Fetches All Posts But Doesn't Paginate on Scroll
-**File:** `frontend/src/pages/CommunityPage.tsx:41-57`  
-**Impact:** `hasMore` state is tracked but there's no intersection observer or "Load More" button visible in the initial page load logic. The `loadMore` state is set but the UI doesn't seem to have a trigger for it in the code I reviewed.
-
----
-
-### 15. Redundant DB Connection Per Request
-**File:** `backend/server.ts:48-55`  
-**Impact:** Every single request calls `connectDB()` as middleware. While the function caches the connection, it still checks `if (cachedConnection)` on every request — adding overhead. This was likely added for serverless (Vercel) but runs on every request in local dev too.
+### 🟢 I3 — No rate limit on `/api/zoom/webhook`
+**Where:** Same as above. Could be flooded.
+**Fix:** Add a `webhookLimiter` similar to `suggestLimiter`. (Low priority if signature is verified.)
 
 ---
 
-### 16. No Rate Limiting on Authentication Endpoints
-**File:** `backend/server.ts:99-116`  
-**Impact:** Login and registration endpoints use the same generic `300 req/15min` limiter as all API endpoints. This is too permissive for auth endpoints — brute-force attacks can attempt 300 passwords per 15 minutes per IP.
-
-**Fix:** Add a stricter rate limiter for `/api/auth/login` (e.g., 10 attempts per 15 minutes).
-
 ---
 
-### 17. `AccountPage` Has No Edit Profile Functionality
-**File:** `frontend/src/pages/AccountPage.tsx`  
-**Impact:** The backend has `PATCH /api/auth/profile` and `PUT /api/auth/password` endpoints, but the Account page only shows the user's info and a Zoom integration card. Users can't change their name, email, or password from the UI.
+## Fixes Applied (2026-06-03 pass)
 
----
+| # | Action | Status |
+|---|--------|--------|
+| B1 | `POST /api/zoom/upload-transcript` (multipart .vtt/.txt + rawText JSON body) + AccountPage dropzone | ✅ Done |
+| B2 | Speaker heuristic: `isSpeakerLabel()` checks word count ≤4, capital start, no internal punctuation, next line is longer | ✅ Done |
+| B3 | `TranscriptSegment` now carries `startSec`; `extractSnippet` uses it for timed excerpts | ✅ Done |
+| B5 | `convertInsightToFAQ` sets `sourceMeetingId` / `sourceMeetingTopic` / `confidence_score` on promoted FAQ | ✅ Done |
+| B6 | Dead `while` loop removed from `parseVTTWithSpeakers` | ✅ Done |
+| B7 | `isEmptyTranscript` returns `{ empty, warning }`; below 50 chars logs warn but still passes | ✅ Done |
+| B8 | Empty `meetingTopic` defaults to "Untitled meeting" before LLM call | ✅ Done |
+| F1 | Manual upload dropzone on AccountPage (admin/moderator sees it always; connected users see it too) | ✅ Done |
+| I2 | `verifyZoomSignature()` checks `x-zm-signature` HMAC-SHA256 against `ZOOM_WEBHOOK_SECRET_TOKEN`; skips if env not set (dev mode) | ✅ Done |
 
-### 18. `getAllUsers` in AuthController Duplicates Admin Check
-**File:** `backend/controllers/authController.ts:110-121`  
-**Impact:** The route already uses `protect, authorize('admin')` middleware, but the controller also checks `req.user.role !== 'admin'` manually. This is redundant and will diverge if roles change.
-
----
-
-## 🔵 LOW — Minor Issues / Improvements
-
-### 19. Unused Import: `axios` in `HomePage.tsx`
-**File:** `frontend/src/pages/HomePage.tsx:3`  
-**Details:** `axios` is imported directly but only used once for `axios.isCancel(err)`. The `api` instance already wraps axios. Could use `api.isAxiosError()` or just catch cancel errors differently.
-
----
-
-### 20. `fallbackPopular` Hardcoded Queries Don't Match Real Data
-**File:** `frontend/src/pages/HomePage.tsx:108-114`  
-**Details:** Fallback popular searches ("offer letter", "noc request", etc.) are hardcoded and may not match any actual FAQs in the database, leading to "no results" when clicked.
-
----
-
-### 21. No 404 Page — All Unknown Routes Redirect to Home
-**File:** `frontend/src/App.tsx:114`  
-**Details:** `<Route path="*" element={<Navigate to="/" replace />} />` silently redirects all invalid URLs. Users who mistype a URL won't know they made a mistake.
-
-**Fix:** Create a proper 404 page component.
-
----
-
-### 22. `AdminLogin` Uses `framer-motion` — Only Place in the App
-**File:** `frontend/src/admin/pages/AdminLogin.tsx:3`  
-**Impact:** Adds ~32KB to the bundle for a single fade-in animation on the admin login page. Can be done with CSS `@keyframes`.
-
----
-
-### 23. SearchLog Batch Buffer Has No Drain on Shutdown
-**File:** `backend/controllers/searchController.ts:32-61`  
-**Impact:** If the server shuts down while logs are buffered, those search logs are lost. The `SIGTERM`/`SIGINT` handlers in `server.ts` don't flush the search log buffer.
-
----
-
-### 24. Console Warnings in Production
-**Files:** `backend/controllers/searchController.ts:80,120`, `backend/utils/cache.ts:57,61,79`  
-**Impact:** `console.warn()` and `console.log()` calls for cache hits/misses and search failures run in production, cluttering logs with non-actionable noise. Should use the structured `logger` utility instead.
-
----
-
-### 25. No `<title>` or Meta Tags on Any Page
-**Files:** All pages in `frontend/src/pages/`  
-**Impact:** Every page shows the default Vite `<title>` ("Vite + React + TS"). No page-specific titles, no meta descriptions. Bad for SEO and tab identification.
-
-**Fix:** Use `react-helmet-async` or `document.title` in each page component.
-
----
-
-### 26. Missing `aria-label` on Several Interactive SVG Buttons
-**Files:** `Navbar.tsx` (profile dropdown), `HomePage.tsx` (thumbs up/down, history), `SearchBar.tsx` (search icon)  
-**Impact:** Screen readers can't identify the purpose of icon-only buttons.
-
----
-
-### 27. Backend `getAllUsers` Route Returns Full User Objects Including Zoom Fields
-**File:** `backend/controllers/authController.ts:116`  
-**Details:** `User.find({})` without `.select()` returns all fields. While `password` is `select: false`, other sensitive fields like `zoomUserId`, `banReason`, `positiveBadges`, `negativeBadges` are all returned to the admin frontend. The admin controller in `adminController.ts` correctly uses `.select('-password')` but `authController.ts` does not.
-
----
-
-## Summary
-
-| Severity | Count |
-|----------|-------|
-| 🔴 Critical | 5 |
-| 🟠 High | 5 |
-| 🟡 Medium | 8 |
-| 🔵 Low | 9 |
-| **Total** | **27** |
-
-### Recommended Fix Priority:
-1. **Fix TS build errors** (#1, #13) — unblocks deployment
-2. **Security: Zoom tokens + JWT validation** (#2, #3, #5) — critical vulnerabilities
-3. **Fix authorize middleware 500 → 403** (#4) — users see wrong error
-4. **Fix confidence level dead code** (#6) — misleads users  
-5. **Fix admin login session leak** (#8) — security hole
-6. **Add edit profile UI** (#17) — basic feature gap
-7. **Everything else** — code quality and polish
+Backlog (not touched): B4, D1, D2, I1, I3, F2, F3.

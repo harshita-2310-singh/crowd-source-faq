@@ -17,6 +17,7 @@
 
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 dotenv.config({ path: '.env.local' });
@@ -42,14 +43,14 @@ async function getCollection(name: string) {
 
 // ─── Retention runners ─────────────────────────────────────────────────────────
 
-async function cleanSearchLogs(): Promise<number> {
+export async function cleanSearchLogs(): Promise<number> {
   const col = await getCollection('yaksha_faq_searchlogs');
   const before = daysAgo(RETENTION_DAYS);
   const result = await col.deleteMany({ createdAt: { $lt: before } });
   return result.deletedCount;
 }
 
-async function cleanNotifications(): Promise<number> {
+export async function cleanNotifications(): Promise<number> {
   const col = await getCollection('yaksha_faq_notifications');
   const before = daysAgo(NOTIFICATION_READ_DAYS);
   // Only delete read notifications older than the retention period
@@ -57,21 +58,21 @@ async function cleanNotifications(): Promise<number> {
   return result.deletedCount;
 }
 
-async function cleanFreshReviewLogs(): Promise<number> {
+export async function cleanFreshReviewLogs(): Promise<number> {
   const col = await getCollection('yaksha_faq_freshreviewlogs');
   const before = daysAgo(FRESH_REVIEW_LOG_DAYS);
   const result = await col.deleteMany({ createdAt: { $lt: before } });
   return result.deletedCount;
 }
 
-async function cleanModerationLogs(): Promise<number> {
+export async function cleanModerationLogs(): Promise<number> {
   const col = await getCollection('yaksha_faq_moderationlogs');
   const before = daysAgo(MODERATION_LOG_DAYS);
   const result = await col.deleteMany({ createdAt: { $lt: before } });
   return result.deletedCount;
 }
 
-async function cleanAdminLogs(): Promise<number> {
+export async function cleanAdminLogs(): Promise<number> {
   const col = await getCollection('yaksha_faq_adminlogs');
   const before = daysAgo(ADMIN_LOG_DAYS);
   const result = await col.deleteMany({ createdAt: { $lt: before } });
@@ -129,7 +130,13 @@ async function run() {
   process.exit(0);
 }
 
-run().catch((e) => {
-  console.error('[retention] Fatal:', e);
-  process.exit(1);
-});
+// Only run the cleanup when this file is the entry point (e.g. `npx tsx scripts/retentionPolicy.ts`).
+// When server.ts dynamic-imports this module to call individual cleanups on a 24h schedule,
+// we must NOT run a one-shot cleanup that would `process.exit(0)` and kill the server.
+const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMainModule) {
+  run().catch((e) => {
+    console.error('[retention] Fatal:', e);
+    process.exit(1);
+  });
+}

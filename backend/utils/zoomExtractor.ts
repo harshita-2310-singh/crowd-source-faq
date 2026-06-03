@@ -1,8 +1,10 @@
 /**
  * Zoom transcript → LLM → structured FAQ + Announcement extraction.
  *
- * Uses the MiniMax chat completion API (OpenAI-compatible endpoint).
- * The transcript is sent as a system + user message, and we parse the JSON array response.
+ * Uses the active AI provider resolved via aiProvider.ts (priority
+ * Anthropic > OpenAI > xAI > MiniMax), with DB-configured keys/URLs/models
+ * honoured when present, otherwise env vars. The transcript is sent as a
+ * system + user message and we parse the JSON array response.
  *
  * Prompt design principles:
  *   1. Strict JSON output — model MUST return a JSON array, nothing else.
@@ -12,32 +14,37 @@
  */
 
 import { ZoomInsightType } from '../models/ZoomMeeting.js';
+import { resolveProviderAsync } from './aiProvider.js';
+import { parseVTTWithSpeakers, extractSnippet, isEmptyTranscript, TranscriptSegment } from './vttParser.js';
 
 export interface ExtractedItem {
   type: ZoomInsightType;
   question?: string;       // only for FAQ
   answer_or_content: string;
   confidence_score: number;
+  /** ISO 8601 wall-clock timestamp from the transcript when this Q&A appeared */
+  transcriptTimestamp?: string;
+  /** Speaker name from the transcript for this Q&A */
+  speaker?: string;
   transcript_snippet?: string;
 }
 
-interface MiniMaxMessage {
-  role: 'system' | 'user';
-  content: string;
+/**
+ * Parse either raw VTT or plain text. Returns segments (or empty array for plain text).
+ */
+function parseTranscript(raw: string): TranscriptSegment[] {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('WEBVTT')) {
+    const { warning } = isEmptyTranscript(raw);
+    if (warning) console.warn('[zoomExtractor] Transcript below 50 chars — processing anyway.');
+    return parseVTTWithSpeakers(raw);
+  }
+  // Plain .txt: one line = one paragraph
+  return trimmed
+    .split(/\n\n+/)
+    .filter(p => p.trim().length > 0)
+    .map((text, i) => ({ speaker: '', text: text.trim(), startSec: i * 60 }));
 }
-
-interface MiniMaxChoice {
-  message: { content: string };
-  finish_reason: string;
-}
-
-interface MiniMaxResponse {
-  choices: MiniMaxChoice[];
-  usage?: { input_tokens: number; output_tokens: number };
-}
-
-const MINIMAX_API_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
-const MODEL = 'MiniMax-Text-01';
 
 /**
  * System prompt — instructs the model on strict output format.
@@ -61,22 +68,36 @@ Output rules (strictly follow these):
 - Maximum 150 characters in transcript_snippet.`;
 
 /**
- * Sends cleaned transcript to MiniMax and returns parsed structured items.
+ * Sends cleaned transcript to the active AI provider and returns parsed structured items.
  */
 export async function extractInsightsFromTranscript(
-  transcript: string,
+  rawTranscript: string,
   meetingTopic: string
 ): Promise<ExtractedItem[]> {
-  const apiKey = process.env.MINIMAX_API_KEY;
+  // Default empty topic so the LLM prompt is never "Meeting topic: "
+  const topic = meetingTopic?.trim() || 'Untitled meeting';
 
-  if (!apiKey) {
-    throw new Error('MINIMAX_API_KEY env var not set');
+  const cfg = await resolveProviderAsync();
+  if (!cfg.apiKey) {
+    throw new Error(
+      'No AI API key configured. Set ANTHROPIC_API_KEY / OPENAI_API_KEY / XAI_API_KEY / MINIMAX_API_KEY ' +
+      'or configure a provider in the admin AI dashboard.'
+    );
+  }
+
+  // Parse the raw input (VTT or plain text) to get timed segments
+  const segments = parseTranscript(rawTranscript);
+  const transcript = segments.map(s => `${s.speaker ? s.speaker + ': ' : ''}${s.text}`).join('\n');
+
+  if (!transcript.replace(/\s/g, '')) {
+    console.warn('[zoomExtractor] Transcript is empty after parsing, returning no insights.');
+    return [];
   }
 
   // Truncate transcript to ~8 000 tokens to stay within context limits
   const truncated = transcript.length > 60_000 ? transcript.slice(0, 60_000) + '\n[...transcript truncated...]' : transcript;
 
-  const messages: MiniMaxMessage[] = [
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [
     { role: 'system', content: SYSTEM_PROMPT },
     {
       role: 'user',
@@ -84,37 +105,60 @@ export async function extractInsightsFromTranscript(
     },
   ];
 
-  const body = {
-    model: MODEL,
+  const body: Record<string, unknown> = {
+    model: cfg.model,
     messages,
     max_tokens: 2048,
-    temperature: 0.1, // low temp for deterministic structured output
   };
-
-  const res = await fetch(MINIMAX_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`MiniMax extraction API error (${res.status}): ${text}`);
+  // temperature is not honoured by Anthropic on /messages; skip it for that provider
+  if (!cfg.needsAnthropicVersion) {
+    body.temperature = 0.1;
   }
 
-  const data = (await res.json()) as MiniMaxResponse;
-  const rawContent = data.choices?.[0]?.message?.content ?? '';
+  // Build auth header — Bearer prefix is required by all supported providers
+  const authValue = cfg.provider === 'anthropic' ? cfg.apiKey : `Bearer ${cfg.apiKey}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    [cfg.authHeader]: authValue,
+  };
 
-  return parseExtractedItems(rawContent);
+  let rawContent = '';
+
+  if (cfg.needsAnthropicVersion) {
+    headers['anthropic-version'] = '2023-06-01';
+    const res = await fetch(`${cfg.baseURL}/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...body, stream: false }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`AI extraction API error (${res.status}) [anthropic]: ${text}`);
+    }
+    const data = (await res.json()) as { content?: Array<{ text?: string }> };
+    rawContent = data.content?.[0]?.text ?? '';
+  } else {
+    const res = await fetch(`${cfg.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`AI extraction API error (${res.status}) [${cfg.provider}]: ${text}`);
+    }
+    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    rawContent = data.choices?.[0]?.message?.content ?? '';
+  }
+
+  return parseExtractedItems(rawContent, segments);
 }
 
 /**
  * Parse the raw model output, being defensive about malformed responses.
+ * Uses actual timed segments to produce accurate transcript snippets.
  */
-function parseExtractedItems(raw: string): ExtractedItem[] {
+function parseExtractedItems(raw: string, segments: TranscriptSegment[]): ExtractedItem[] {
   // Try to find a JSON array in the response
   const match = raw.match(/\[[\s\S]*\]/);
   if (!match) return [];
@@ -133,13 +177,25 @@ function parseExtractedItems(raw: string): ExtractedItem[] {
           i.answer_or_content.length > 0
         );
       })
-      .map((item) => ({
-        type: item.type,
-        question: item.question ?? undefined,
-        answer_or_content: String(item.answer_or_content).slice(0, 500),
-        confidence_score: Math.max(0, Math.min(1, Number(item.confidence_score) || 0)),
-        transcript_snippet: String(item.transcript_snippet ?? '').slice(0, 150),
-      }));
+      .map((item) => {
+        const raw = item as unknown as Record<string, unknown>;
+        const confidence = Math.max(0, Math.min(1, Number(raw['confidence_score'] ?? 0)));
+        // Use timed snippet extraction if the model reported a rough time offset
+        const ts    = String(raw['transcript_timestamp'] ?? '').trim();
+        const spkr  = String(raw['speaker']              ?? '').trim();
+        // otherwise grab the first segment as a fallback
+        const snippetStartSec = typeof raw['start_sec'] === 'number' ? Number(raw['start_sec']) : 0;
+        const rawSnippet = extractSnippet(segments, snippetStartSec, 120);
+        return {
+          type: item.type,
+          question: item.question ?? undefined,
+          answer_or_content: String(item.answer_or_content).slice(0, 500),
+          confidence_score: confidence,
+          transcriptTimestamp: ts || undefined,
+          speaker: spkr || undefined,
+          transcript_snippet: rawSnippet || String(item.transcript_snippet ?? '').slice(0, 150),
+        };
+      });
   } catch {
     return [];
   }

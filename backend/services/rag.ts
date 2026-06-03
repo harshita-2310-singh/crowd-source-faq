@@ -1,0 +1,331 @@
+/**
+ * RAG pipeline for the AI assistant bar.
+ *
+ * 1. Embed the user's query.
+ * 2. Search three sources in parallel (limit each to top-K).
+ * 3. Build a numbered context block — each source gets an index [1], [2], ...
+ *    the LLM is told to cite sources by these indices inline.
+ * 4. Send to the LLM with a system prompt that enforces citation + honesty.
+ * 5. Return { answer, sources[] } — sources carry id + title + url + snippet
+ *    so the frontend can render them as inline cards.
+ *
+ * Sources searched:
+ *   - FAQ (yaksha_faq_faqs)
+ *   - Community posts (yaksha_faq_communityposts, answered+unanswered)
+ *   - TranscriptKnowledge (Zoom meeting Q&A extractions)
+ */
+
+import mongoose from 'mongoose';
+import { generateEmbedding } from '../utils/embeddings.js';
+import { resolveProviderAsync } from '../utils/aiProvider.js';
+import { searchKnowledge } from './knowledgeBase.js';
+import { logger } from '../utils/logger.js';
+
+export interface RagSource {
+  /** Stable id — the client uses this as a React key and to link out. */
+  id: string;
+  /** "faq" | "community" | "knowledge" */
+  type: 'faq' | 'community' | 'knowledge';
+  /** Display title. */
+  title: string;
+  /** Snippet shown in the source card (truncated body). */
+  snippet: string;
+  /** URL the client can deep-link to. */
+  url: string;
+  /** Confidence in [0, 1] (vector cosine + keyword overlap). */
+  score: number;
+}
+
+export interface RagResult {
+  answer: string;
+  sources: RagSource[];
+  /** The model that produced the answer (e.g. "gpt-4o-mini"). */
+  model: string;
+}
+
+const TOP_K_PER_SOURCE = 4;
+const MAX_CONTEXT_CHARS = 14000; // leave headroom under typical 16k context windows
+
+interface FaqHit { _id: unknown; question: string; answer: string; category?: string; trustLevel?: string; score: number }
+interface PostHit { _id: unknown; title: string; body: string; status: string; score: number }
+
+/**
+ * Search FAQs via Atlas vector search + native text search, merged with RRF.
+ * Reuses the helper from the search controller (no behavior change — same
+ * ordering + thresholds users already see on the FAQ page).
+ */
+async function searchFaqs(embedding: number[], query: string, limit: number): Promise<FaqHit[]> {
+  const db = mongoose.connection.db;
+  if (!db) return [];
+
+  const [vec, txt] = await Promise.all([
+    db.collection('yaksha_faq_faqs')
+      .aggregate([
+        { $vectorSearch: {
+          index: 'vector_index',
+          path: 'embedding',
+          queryVector: embedding,
+          numCandidates: limit * 10,
+          limit,
+        } },
+        { $project: {
+          _id: 1, question: 1, answer: 1, category: 1, trustLevel: 1,
+          score: { $meta: 'vectorSearchScore' },
+        } },
+        // Match the trust-level boost the search endpoint uses
+        { $addFields: {
+          score: {
+            $add: [
+              { $meta: 'vectorSearchScore' },
+              { $switch: {
+                branches: [
+                  { case: { $eq: ['$trustLevel', 'high'] },   then: 0.15 },
+                  { case: { $eq: ['$trustLevel', 'expert'] }, then: 0.07 },
+                  { case: { $eq: ['$trustLevel', 'medium'] }, then: 0.02 },
+                ],
+                default: 0,
+              } },
+            ],
+          },
+        } },
+      ]).toArray().catch(() => []),
+    db.collection('yaksha_faq_faqs').find(
+      { $text: { $search: query } },
+      { projection: { score: { $meta: 'textScore' }, question: 1, answer: 1, category: 1, trustLevel: 1 } }
+    ).sort({ score: { $meta: 'textScore' } }).limit(limit).toArray().catch(() => []),
+  ]);
+
+  // Reciprocal Rank Fusion — same formula as the search controller.
+  const rrf = (k: number) => 1 / (60 + k);
+  const scoreMap = new Map<string, number>();
+  const docs = new Map<string, Record<string, unknown>>();
+  vec.forEach((d, i) => {
+    const id = String(d._id);
+    scoreMap.set(id, (scoreMap.get(id) ?? 0) + rrf(i));
+    docs.set(id, d as Record<string, unknown>);
+  });
+  txt.forEach((d, i) => {
+    const id = String(d._id);
+    scoreMap.set(id, (scoreMap.get(id) ?? 0) + rrf(i));
+    docs.set(id, d as Record<string, unknown>);
+  });
+  return [...scoreMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([id, s]) => {
+      const d = docs.get(id)!;
+      return {
+        _id: d._id,
+        question: String(d.question ?? ''),
+        answer: String(d.answer ?? ''),
+        category: d.category as string | undefined,
+        trustLevel: d.trustLevel as string | undefined,
+        score: s,
+      };
+    });
+}
+
+async function searchCommunity(embedding: number[], query: string, limit: number): Promise<PostHit[]> {
+  const db = mongoose.connection.db;
+  if (!db) return [];
+
+  const [vec, txt] = await Promise.all([
+    db.collection('yaksha_faq_communityposts')
+      .aggregate([
+        { $vectorSearch: {
+          index: 'vector_index',
+          path: 'embedding',
+          queryVector: embedding,
+          numCandidates: limit * 10,
+          limit,
+        } },
+        { $project: { _id: 1, title: 1, body: 1, status: 1, score: { $meta: 'vectorSearchScore' } } },
+      ]).toArray().catch(() => []),
+    db.collection('yaksha_faq_communityposts').find(
+      { $text: { $search: query } },
+      { projection: { score: { $meta: 'textScore' }, title: 1, body: 1, status: 1 } }
+    ).sort({ score: { $meta: 'textScore' } }).limit(limit).toArray().catch(() => []),
+  ]);
+
+  const rrf = (k: number) => 1 / (60 + k);
+  const scoreMap = new Map<string, number>();
+  const docs = new Map<string, Record<string, unknown>>();
+  vec.forEach((d, i) => {
+    const id = String(d._id);
+    scoreMap.set(id, (scoreMap.get(id) ?? 0) + rrf(i));
+    docs.set(id, d as Record<string, unknown>);
+  });
+  txt.forEach((d, i) => {
+    const id = String(d._id);
+    scoreMap.set(id, (scoreMap.get(id) ?? 0) + rrf(i));
+    docs.set(id, d as Record<string, unknown>);
+  });
+  return [...scoreMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([id, s]) => {
+      const d = docs.get(id)!;
+      return {
+        _id: d._id,
+        title: String(d.title ?? ''),
+        body: String(d.body ?? ''),
+        status: String(d.status ?? ''),
+        score: s,
+      };
+    });
+}
+
+/** Render source snippets — the LLM only sees these, plus the question. */
+function buildContext(sources: RagSource[]): string {
+  const blocks: string[] = [];
+  let total = 0;
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    const block = `[${i + 1}] (${s.type}) ${s.title}\n${s.snippet}`;
+    if (total + block.length > MAX_CONTEXT_CHARS) break;
+    blocks.push(block);
+    total += block.length;
+  }
+  return blocks.join('\n\n');
+}
+
+function buildPrompt(question: string, context: string): string {
+  return `You are the Yaksha FAQ assistant. Answer the user's question using ONLY the sources provided below. Be honest about uncertainty — if the sources don't contain the answer, say so plainly and suggest they ask the community.
+
+Cite sources inline by their bracketed index, e.g. "The NOC is required by your HOD before you sign it [1][3]." Use one citation per fact, multiple citations are fine when sources agree.
+
+Keep the answer under 8 sentences unless the user explicitly asks for a longer explanation. Be specific. Use the user's tone (English / Hinglish mix is fine).
+
+SOURCES
+${context}
+
+USER QUESTION
+${question}
+
+ANSWER (cite sources inline):`;
+}
+
+/**
+ * Main entry — runs the full RAG pipeline. Returns the answer + the
+ * sources the LLM saw, in citation order. The caller (controller) just
+ * forwards this as JSON.
+ */
+export async function runRag(question: string): Promise<RagResult> {
+  const t0 = Date.now();
+  const embedding = await generateEmbedding(question);
+  logger.info('rag.embedding.done', { ms: Date.now() - t0 });
+
+  // Fan out — 3 sources, top-K each, in parallel.
+  const [faqHits, postHits, knowledgeHits] = await Promise.all([
+    searchFaqs(embedding, question, TOP_K_PER_SOURCE).catch((e) => {
+      logger.warn('rag.faq.search.failed', { error: (e as Error).message });
+      return [] as FaqHit[];
+    }),
+    searchCommunity(embedding, question, TOP_K_PER_SOURCE).catch((e) => {
+      logger.warn('rag.community.search.failed', { error: (e as Error).message });
+      return [] as PostHit[];
+    }),
+    searchKnowledge(question, TOP_K_PER_SOURCE).catch((e) => {
+      logger.warn('rag.knowledge.search.failed', { error: (e as Error).message });
+      return [] as Awaited<ReturnType<typeof searchKnowledge>>;
+    }),
+  ]);
+
+  // Normalize each source into the common shape.
+  const sources: RagSource[] = [
+    ...faqHits.map((h) => ({
+      id: `faq:${String(h._id)}`,
+      type: 'faq' as const,
+      title: h.question,
+      snippet: h.answer.slice(0, 600),
+      url: `/faq/${String(h._id)}`,
+      score: h.score,
+    })),
+    ...postHits.map((h) => ({
+      id: `community:${String(h._id)}`,
+      type: 'community' as const,
+      title: h.title,
+      snippet: h.body.slice(0, 600),
+      url: `/community?post=${String(h._id)}`,
+      score: h.score,
+    })),
+    ...knowledgeHits.map((h) => ({
+      id: `knowledge:${h._id}`,
+      type: 'knowledge' as const,
+      title: h.question,
+      snippet: h.answer.slice(0, 600),
+      // Knowledge isn't a public page yet — link to the post that sourced it,
+      // or to the admin KB if we know the meeting. For now, a stable
+      // deep-link to a future /knowledge/:id is best-effort.
+      url: `/community?post=${h._id}`,
+      score: h.score,
+    })),
+  ];
+
+  // Re-rank by score so the LLM sees the strongest sources first.
+  sources.sort((a, b) => b.score - a.score);
+
+  // If we found nothing at all, skip the LLM call — just say "no answer".
+  if (sources.length === 0) {
+    return {
+      answer: "I couldn't find anything relevant in the FAQ, community, or your team's Zoom knowledge base. Try rephrasing, or post a new question to the community.",
+      sources: [],
+      model: 'none',
+    };
+  }
+
+  const context = buildContext(sources);
+  const prompt = buildPrompt(question, context);
+
+  // Call the LLM. We use the same provider resolution as duplicate detection
+  // and knowledge extraction so the same AI key chain powers the assistant.
+  const cfg = await resolveProviderAsync();
+  const t1 = Date.now();
+  const answer = await chatCompletion(cfg, prompt);
+  logger.info('rag.completion.done', { ms: Date.now() - t1, model: cfg.model, sources: sources.length });
+
+  return { answer, sources, model: cfg.model };
+}
+
+/**
+ * Tiny chat completion helper — same shape as the one in knowledgeBase
+ * but lifted here so the RAG pipeline doesn't pull in extra imports.
+ */
+async function chatCompletion(
+  cfg: { apiKey: string; baseURL: string; model: string; provider: string; needsAnthropicVersion: boolean; authHeader: 'x-api-key' | 'Authorization' },
+  prompt: string
+): Promise<string> {
+  const authValue = cfg.provider === 'anthropic' ? cfg.apiKey : `Bearer ${cfg.apiKey}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    [cfg.authHeader]: authValue,
+  };
+  if (cfg.needsAnthropicVersion) {
+    headers['anthropic-version'] = '2023-06-01';
+    const res = await fetch(`${cfg.baseURL}/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 800,
+      }),
+    });
+    if (!res.ok) throw new Error(`Anthropic error: ${res.status} ${await res.text()}`);
+    const data = (await res.json()) as { content?: Array<{ text?: string }> };
+    return data.content?.[0]?.text ?? '';
+  }
+  const res = await fetch(`${cfg.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 800,
+      temperature: 0.2,
+    }),
+  });
+  if (!res.ok) throw new Error(`${cfg.provider} error: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return data.choices?.[0]?.message?.content ?? '';
+}

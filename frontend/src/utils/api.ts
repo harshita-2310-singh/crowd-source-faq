@@ -250,10 +250,13 @@ api.interceptors.response.use(
       localStorage.removeItem('yaksha_token');
       localStorage.removeItem('yaksha_user');
 
-      const currentPath = window.location.pathname + window.location.search;
-      if (window.location.pathname !== '/login') {
-        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}&expired=true`;
-      }
+      // Open the auth modal in place. The provider also stores the current
+      // path as a "resume" hint so we can come back after re-auth. We avoid
+      // a full page navigation — the modal sits on top of whatever the user
+      // was doing, and on success the gate replays the pending action.
+      window.dispatchEvent(new CustomEvent('authmodal:open', {
+        detail: { tab: 'signin', prompt: 'Your session has expired. Please sign in again.' },
+      }));
     }
     return Promise.reject(error);
   }

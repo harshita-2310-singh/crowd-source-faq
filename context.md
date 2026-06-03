@@ -132,35 +132,66 @@ shamagama/
 - `embedding` field stored but `select: false` — never returned in normal queries
 - `POST /api/faq/check-match` — detects if a user's community post question already has a high-similarity FAQ match (threshold 0.82) and surfaces the FAQ inline
 - **Pagination:** `/faq` supports `?page=&limit=&category=` for paginated flat responses; `/faq/paginated` is the dedicated paginated endpoint
+- **Freshness system:** `freshnessTier` (evergreen/seasonal/volatile) + daily cron flags expired FAQs for review; peer voting auto-verifies/escalates; moderator verifies or dismisses
+- **FAQ Promotion tiers:** community answer promoted to FAQ → `trustLevel: 'medium'` (Community Approved); admin upgrades → `expert` (Admin Approved) or `high` (Official). Source tracked: `community_promotion | expert_verified | zoom_transcript | manual`
 
 ### 4.3 Community Q&A Board
 
-- Users post questions (title + body, 150/2000 char limits)
+- Users post questions (title + body + tags, 150/2000 char limits, max 3 tags)
 - Post creation auto-checks FAQ duplicates via `check-match` before allowing submission
 - **Post statuses:** `unanswered` | `answered`
+- **Answer acceptance:** post author can accept any comment as the official answer (`PATCH /community/:id/comments/:commentId/accept-answer`) → sets `answer`, `answerAuthorId`, `status: 'answered'`, comment marked `verified: true`. Accepted answer can be from Zoom knowledge base (`answeredFromKnowledgeId`).
 - **Voting:** Upvote posts; upvote/downvote comments (stored as user ID arrays)
 - **Comment auto-delete:** Net score ≤ −5 → comment deleted + "Faah" sound effect on frontend
-- **Verified comments:** Moderators can mark a comment as the verified top answer
-- **Resolve flow:** Admin/moderator writes an official answer → post status → `answered`, post shows "Official Answer" banner
+- **Verified comments:** Moderators can mark a comment as the verified top answer (`PATCH .../verify`)
+- **Solution DNA:** Admin can add structured answer metadata (steps, tools, timeToComplete, difficulty) at post level or comment level
+- **Time-Trial:** 16h unanswered → `pending`; first top-level comment wins `FirstResponder` badge + 20 points
+- **Escalation:** posts with 3+ unanswered comments can be escalated to moderators; resolved/dismissed by admin
 - Community search via `GET /community/search?q=` uses the same hybrid search against community posts
+- **Auto-promotion:** answered posts with 10+ upvotes enter 24h review window → auto-promoted to `Community Approved` FAQ
 
 ### 4.4 Admin Dashboard
 
-- **4 tabs:** Analytics, FAQs, Community, Users
+- **5 tabs:** Analytics, FAQs, Community, Users, Moderation
 - **Analytics:** Total searches, popular queries, failed queries, fail rate, recent activity chart
-- **FAQ management:** Create/edit/delete/approve/reject FAQs; filter by status/category; search; sort
-- **Community moderation:** View all posts, resolve unanswered posts with official answers
-- **User management:** List users (paginated), search by name/email, update user roles
+- **FAQ management:** Create/edit/delete/approve/reject FAQs; FreshnessTierSelector; filter by status/category; search; sort
+- **Community moderation:** View all posts, resolve unanswered posts with official answers, escalation management
+- **User management:** List users (paginated), search by name/email, update user roles, suspend/unsuspend
 - **AdminLog:** Every admin action is logged with `{ adminId, action, targetId, targetType, details }`
-- **Admin activity feed:** Shows last 20 admin actions
+- **Promotion review:** admin can upgrade `community_approved` FAQs → `admin_approved` or `official`; moderator can raise objection
 
-### 4.5 Analytics
+### 4.5 Notifications (SpillTheTea)
+
+- `TeaNotification` model: events for `post_answered` (admin/AI resolved), `post_deleted`, `post_answered_user` (community reply), `faq_published`, `post_upvoted`, `comment_received`
+- `Notification` model: `post_resolved`, `comment_received`, `faq_match_found`, `mention`, `accepted_answer`
+- `SpillTheTea` frontend component: ☕ button with unread badge, dropdown with events, background polling every 30s
+- Toast shown on `post_answered` when user is on the community page (dropdown closed, new event detected)
+- `NotificationBell` dropdown: mark all read, click-to-navigate to post/FAQ
+
+### 4.6 Zoom Integration
+
+- OAuth flow: admin connects Zoom account → user grants scopes (`recording:read`, `meeting:read`)
+- `GET /api/zoom/meetings` — paginated list with participant counts
+- `POST /api/zoom/transcripts` — webhook processes completed recordings → extracts insights (FAQ type or Announcement)
+- Circuit breaker: trips after 3 failures → 30s open → serve stale cache
+- Fallback: `zoomCache.ts` TTL cache (60s lists, 5min items) with stale-while-revalidate
+- `TranscriptKnowledge` collection stores extracted knowledge for AI duplicate detection
+
+### 4.7 AI Duplicate Detection
+
+- Multi-provider: `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` > `XAI_API_KEY` > `MINIMAX_API_KEY` (priority order)
+- `duplicateDetector.ts`: semantic similarity check against all FAQs + community posts
+- On community post submit: if similarity ≥ 0.82, banner shown with link to matching FAQ
+- `SpillTheTea` events emitted on `post_answered` and `post_deleted`
+
+### 4.8 Analytics
 
 - `GET /api/analytics` — popular queries, failed queries (0 results), total searches (admin/mod only)
 - `GET /api/admin/faq-growth` — FAQ creation trend over configurable days
 - `GET /api/admin/top-categories` — FAQ count + views per category
 - `GET /api/admin/search-insights` — top 15 queries, fail rate, daily activity
 - `GET /api/admin/user-activity-chart` — daily search volume over N days
+- `GET /api/community/solved` — posts resolved in last 24h (for "Top Solved Today" on home page)
 
 ---
 
@@ -175,19 +206,51 @@ shamagama/
 
 ### FAQ
 ```js
-{ question, answer, category, embedding (select:false), searchCount, views, helpfulVotes, status, createdBy }
-// Status enum: 'pending' | 'approved' | 'rejected'
+{ question, answer, category, embedding (select:false), searchCount, views, helpfulVotes, unhelpfulVotes,
+  status: 'pending'|'approved'|'rejected', createdBy,
+  // Freshness system
+  freshnessTier: 'evergreen'|'seasonal'|'volatile',
+  reviewIntervalDays, reviewStatus: 'verified'|'pending_review'|'update_requested',
+  lastVerifiedDate, flaggedAt, flagType: 'auto'|'manual'|null, flagReason, flaggedBy, reviewCycle,
+  // Promotion system
+  trustLevel: 'low'|'medium'|'high'|'expert', sourceType: 'manual'|'community_promotion'|'expert_verified'|'zoom_transcript',
+  sourceMeetingId, sourceCommunityPostId, sourceCommentId, promotedAt, objectionStatus: 'none'|'objected'|'resolved',
+  promotionMetadata: { upvotesAtPromotion, helpfulVotesAtPromotion, communityAnswerAuthorId, promotedBy, objectionReason, objectionRaisedBy, objectionRaisedAt }
+}
 // Text index on question + answer
 // Collection: yaksha_faq_faqs
 ```
 
 ### CommunityPost
 ```js
-{ title, body, author, status, answer, upvotes[], embedding (select:false),
-  comments: [{ author, body, upvotes[], downvotes[], verified }] }
-// Status enum: 'unanswered' | 'answered'
+{ title, body, tags[], author, status: 'unanswered'|'answered', answer, answerAuthorId, answerIsExpert,
+  upvotes[], embedding (select:false),
+  comments: [{ author, body, upvotes[], downvotes[], verified, isExpertAnswer, isFirstResponder,
+    firstResponderAwardedAt, parentId, depth, replies, solutionDNA: { keyPoints, summary, tags } }],
+  dna: { steps[], tools[], timeToComplete, difficulty: 'Easy'|'Moderate'|'Tricky' },
+  reports: [{ reportedBy, reason, createdAt }],
+  escalationStatus: 'none'|'escalated'|'resolved'|'dismissed',
+  escalatedAt, escalationReason, escalatedBy, escalationResolvedAt, escalationResolvedBy, escalationOutcome,
+  answeredFromKnowledgeId, // ID from Zoom transcript knowledge base
+  timeTrialStatus: 'none'|'pending'|'awarded', timeTrialStartedAt, timeTrialFirstResponder, timeTrialFirstResponderAt,
+  // Promotion
+  eligibleForPromotion, promotionPendingAt, promotionCandidateCommentId,
+  promotionObjectedBy, promotionObjectedAt, promotionObjectionReason
+}
 // Text index on title + body
 // Collection: yaksha_faq_communityposts
+```
+
+### Notification
+```js
+{ recipient, type: 'post_resolved'|'comment_received'|'faq_match_found'|'mention'|'accepted_answer',
+  title, message, link, read, createdAt }
+```
+
+### TeaNotification (SpillTheTea)
+```js
+{ userId, eventType: 'faq_published'|'post_answered'|'post_deleted'|'post_answered_user'|'post_upvoted'|'comment_received',
+  faqId, faqQuestion, postId, postTitle, triggeredBy, triggeredByName, content, read, createdAt }
 ```
 
 ### SearchLog
@@ -221,15 +284,24 @@ shamagama/
 | GET | `/api/faq/paginated` | Paginated flat FAQ list |
 | GET | `/api/faq/:id` | Single FAQ |
 | POST | `/api/faq/check-match` | Check if query has FAQ duplicate |
-| GET | `/api/community` | Paginated community posts |
+| GET | `/api/community` | Paginated community posts (cursor-based) |
 | GET | `/api/community/:id` | Single post with comments |
 | POST | `/api/community` | Create post |
 | POST | `/api/community/:id/upvote` | Toggle upvote |
-| POST | `/api/community/:id/comments` | Add comment |
-| POST | `/api/community/:id/comments/:cid/upvote` | Upvote comment |
-| POST | `/api/community/:id/comments/:cid/downvote` | Downvote comment (auto-deletes at net −5) |
-| PATCH | `/api/community/:id/comments/:cid/verify` | Mark comment as verified (mod/admin) |
 | PATCH | `/api/community/:id/resolve` | Mark post answered (mod/admin) |
+| PATCH | `/api/community/:id/comments/:commentId/accept-answer` | Accept comment as official answer (post author) |
+| PATCH | `/api/community/:id/comments/:commentId/verify` | Mark comment verified (mod/admin) |
+| PATCH | `/api/community/:id/comments/:commentId/upvote` | Toggle comment upvote |
+| POST | `/api/community/:id/comments/:commentId/downvote` | Toggle comment downvote (auto-deletes at net −5) |
+| POST | `/api/community/:id/comments` | Add comment |
+| GET | `/api/community/solved` | Posts resolved in last 24h |
+| GET | `/api/community/search?q=` | Hybrid search of community posts |
+| GET | `/api/notifications` | User notifications |
+| PATCH | `/api/notifications/:id/read` | Mark notification read |
+| PATCH | `/api/notifications/read-all` | Mark all read |
+| GET | `/api/notifications/tea` | SpillTheTea events |
+| PATCH | `/api/notifications/tea/read-all` | Mark all tea read |
+| GET | `/api/community/review-queue` | FAQs pending peer review |
 | POST | `/api/search` | Hybrid semantic search |
 | GET | `/api/search/trending` | Top 6 trending queries |
 
@@ -252,7 +324,20 @@ shamagama/
 | DELETE | `/api/admin/faq/:id` | Delete FAQ |
 | PATCH | `/api/auth/users/:id/role` | Update user role |
 | GET | `/api/analytics` | Search log analytics |
+| GET | `/api/community` | Paginated community posts |
 | DELETE | `/api/community/:id` | Delete community post |
+| PATCH | `/api/community/:id/tags` | Update post tags |
+| PATCH | `/api/community/:id/dna` | Set solution DNA |
+| GET | `/api/admin/escalated` | Escalated posts |
+| PATCH | `/api/admin/escalated/:id/verify` | Mod verifies escalated FAQ |
+| PATCH | `/api/admin/escalated/:id/dismiss` | Mod dismisses |
+| POST | `/api/admin/community/:id/object` | Object to promotion |
+| GET | `/api/admin/community/pending-promotions` | Pending promotions list |
+| POST | `/api/admin/community/pending-promotions/:id/promote` | Promote to admin-approved/official |
+| GET | `/api/zoom/health` | Zoom integration health |
+| GET | `/api/zoom/meetings` | Paginated Zoom meetings |
+| POST | `/api/zoom/transcripts` | Ingest transcript |
+| GET | `/api/admin/zoom-insights` | Zoom insights (FAQ/Announcements) |
 
 ### Test Credentials
 | Role | Email | Password |
@@ -295,31 +380,43 @@ shamagama/
 
 | Feature | Details |
 |---------|---------|
-| **Pagination** | Community posts paginated (20/page); FAQ paginated endpoint exists (`/faq/paginated`) |
+| **Pagination** | Community posts paginated (20/page); FAQ paginated endpoint (`/faq/paginated`) |
 | **SearchLog TTL** | 90-day auto-expiry via MongoDB TTL index; prevents unbounded growth |
 | **Compound indexes** | `{ category, status, createdAt }` on FAQs; `{ status, createdAt }` on posts; `{ query, createdAt }` for search logs |
-| **Embedding API** | Replaced blocking in-process model with OpenAI async calls |
+| **Local embeddings** | `@xenova/transformers` runs `Xenova/multi-qa-mpnet-base-dot-v1` in-process in Node.js — no API key needed |
+| **Redis shared cache** | Upstash Redis (TTL cache for search results and Zoom data, shared across serverless instances) |
+| **Graceful shutdown** | SIGTERM/SIGINT handlers flush search log buffer before exit |
+| **Sentry** | Error tracking wired to `server.ts` |
+| **Cursor-based pagination** | Community posts use keyset cursor on `_id` desc; `nextCursor` base64 encoded |
+| **FAQ Freshness system** | Backend fully implemented; frontend FreshnessBadge on FAQ cards |
+| **Solution DNA** | Post-level and comment-level structured answer metadata (steps, tools, time, difficulty) |
+| **Community FAQ promotion** | Auto-promotion: answered posts with 10+ upvotes → Community Approved FAQ after 24h review window |
 
 ### ⚠️ Partially Done
 
 | Feature | Status |
 |---------|--------|
-| **Cache** | In-memory LRU (500 items, 1-hour TTL) exists but **breaks across Vercel serverless instances** — each Lambda has its own heap |
+| **Zoom OAuth** | OAuth flow implemented, scopes configured, Zoom insights extraction working, circuit breaker + fallback cache active |
+| **Time-Trial** | 16h countdown → first top-level comment wins FirstResponder badge + 20 points; atomic findOneAndUpdate prevents race |
+| **Escalation** | Posts with 3+ unanswered comments can be escalated; admin resolves/dismisses via escalationController |
 
 ### ❌ Not Yet Done (blocking 1M users)
 
 | Priority | Feature | Why It Matters |
 |----------|---------|---------------|
-| **P0** | **Redis shared cache** | In-memory LRU is per-instance; with Vercel serverless, cache hit rate ≈ 0% |
 | **P0** | **User-level rate limiting** | IP-based 300 req/15min breaks legitimate users behind corporate NAT; need per-user JWT-based limits |
-| **P1** | **Email domain restriction** | Anyone can register; no spam/dormant account guardrail |
-| **P1** | **Admin 2FA (TOTP)** | No two-factor auth for admin accounts; target for credential stuffing at 1M users |
-| **P1** | **Cursor-based pagination** | Offset pagination is fine for 1K items; cursor-based is needed for extreme scale + consistent infinite scroll |
-| **P2** | **Push notifications** | Users have no in-app notification when their post is answered |
-| **P2** | **Failed search → FAQ workflow** | Failed queries (0 results) identify gaps but aren't routed to admin FAQ creation |
-| **P2** | **Bulk CSV FAQ import** | Admins must create FAQs one-by-one; needed at scale |
-| **P3** | **Sentry / error tracking** | No observability; production errors invisible |
-| **P3** | **Load testing suite** | No k6/Artillery tests; can't predict breaking points |
+| **P0** | **Auth endpoint rate limiting** | `/api/auth/login` and `/api/auth/register` have NO per-IP rate limit — brute-force possible |
+| **P0** | **XSS sanitization** | User-generated `answer` and `body` fields have no HTML sanitization; stored XSS possible |
+| **P0** | **JWT token refresh revocation** | `refreshTokenHash` set on login but NOT verified on refresh — stolen token valid for 7 days |
+| **P1** | **Email domain restriction** | Anyone can register; no spam guard |
+| **P1** | **Admin 2FA (TOTP)** | No 2FA for admin accounts |
+| **P1** | **Freshness cron wired** | `runFreshnessCheck()` defined in `freshnessController.ts` but NOT called by any scheduler |
+| **P1** | **FAQ FreshnessBadge on public FAQ page** | Only visible to admins; public FAQ page does not show freshness status |
+| **P2** | **GDPR data export** | No `GET /api/auth/export` endpoint |
+| **P2** | **Failed search → FAQ workflow** | Failed queries identify gaps but not routed to admin FAQ creation |
+| **P2** | **Bulk CSV FAQ import** | Admins must create FAQs one-by-one |
+| **P3** | **Sentry / error tracking** | Wired but not verified end-to-end |
+| **P3** | **Load testing suite** | No k6/Artillery tests |
 | **P3** | **Multi-language support** | Embedding model + UI are English-only; India user base needs Indic language support |
 
 ---
@@ -402,12 +499,17 @@ npm run backfill:embeddings  # Regenerate stored embeddings (if switching models
 
 ## 13. Key Implementation Notes
 
-- The in-memory LRU cache (`searchCache`) is **not shared across Vercel serverless instances**. A Redis cache is the planned replacement — **P0 priority** before production traffic.
-- The seed script (`backend/scripts/seed.js`) reads from `./faqs.json` at the backend root directory — this is the 130-FAQ file regenerated from `endpoints.txt`
-- The `temp/` directory is a stale pre-refactor copy — do not use it as a reference.
-- Community posts are **not paginated in the admin page** (`fetchPosts` uses the default un-paginated behavior internally; this is a known gap for admins reviewing large volumes).
-- Comment voting uses optimistic UI updates — upvote state is toggled locally before the API call resolves.
+- The search cache is **Upstash Redis** (shared across serverless instances). If Redis is unavailable, search falls back to direct DB queries.
+- The seed script (`backend/scripts/seed.ts`) reads from `../samagama_faq.json` at the backend root directory.
+- `CommunityPost.comments` is an **embedded subdocument array** — not a separate collection. Comment `_id` values are local to the post document.
+- **Comment voting** uses optimistic UI updates — upvote state is toggled locally before the API call resolves.
 - The "Faah" sound effect (`fahhhhh.mp3`) is played client-side when a comment is auto-deleted at net −5 score.
+- The `temp/` directory does not exist — it was removed in a prior cleanup.
+- **SpillTheTea** polls every 30s when the dropdown is closed — `lastSeenIdRef` tracks the latest event ID to avoid toasting on pre-existing data.
+- **FAQ promotion** is triggered automatically when an answered post accumulates 10+ upvotes and sits in the 24h review window without a moderator objection.
+- **Freshness cron** (`runFreshnessCheck`) is defined in `freshnessController.ts` but NOT wired to `node-cron` — it must be connected before production deployment.
+- **Zoom OAuth**: scopes `recording:read` + `meeting:read` are configured on a **user-managed OAuth app** (not Server-to-Server OAuth). The `ZOOM_REDIRECT_URI` must point to the backend callback.
+- **AI duplicate detection**: provider resolution order is `ANTHROPIC > OPENAI > XAI > MINIMAX`. Server does not start without at least one of these API keys set.
 
 ---
 

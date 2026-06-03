@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 
-export type ResultSource = 'faq' | 'community';
+export type ResultSource = 'faq' | 'community' | 'knowledge';
 
 export interface SearchResultItem {
   _id: Types.ObjectId;
@@ -15,6 +15,11 @@ export interface SearchResultItem {
   rrfScore?: number;
   vectorScore?: number;
   textScore?: number;
+  // Freshness system — required for the public FreshnessBadge
+  reviewStatus?: 'verified' | 'pending_review' | 'update_requested';
+  lastVerifiedDate?: Date;
+  reviewIntervalDays?: number;
+  freshnessTier?: 'evergreen' | 'seasonal' | 'volatile';
 }
 
 export interface RRFEntry {

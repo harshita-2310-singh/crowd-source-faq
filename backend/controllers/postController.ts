@@ -11,8 +11,7 @@ import ReputationLog from '../models/ReputationLog.js';
 import { autoAwardBadges } from './reputationController.js';
 import { sanitizeHtml } from '../utils/sanitize.js';
 import { logger } from '../utils/logger.js';
-import { detectDuplicatesWithAI } from '../utils/duplicateDetector.js';
-import FreshReviewVote from '../models/FreshReviewVote.js';
+import { checkDuplicate } from './postDuplicateController.js';
 
 // Extend Express Request to include user (same pattern as auth middleware)
 declare global {
@@ -70,7 +69,7 @@ export const getAllPosts = async (req: Request, res: Response): Promise<void> =>
     const search = (req.query.search as string)?.trim() || '';
 
     // Build query filter
-    const query: Record<string, unknown> = {};
+    const query: Record<string, unknown> = { isHidden: { $ne: true } };
     if (filter === 'unanswered') query.status = 'unanswered';
     else if (filter === 'answered') query.status = 'answered';
     // 'all' → no status filter
@@ -227,7 +226,16 @@ export const getPostById = async (req: Request, res: Response): Promise<void> =>
 export const createPost = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
   try {
-    const { title, body, tags } = req.body as { title?: string; body?: string; tags?: string[] };
+    const { title, body, tags, attachments } = req.body as {
+      title?: string;
+      body?: string;
+      tags?: string[];
+      // Cloudinary attachment metadata. We never accept raw file blobs here
+      // — the browser uploads to Cloudinary directly using /api/upload/sign,
+      // then sends back just the publicId + url. We validate ownership of
+      // the URL before saving.
+      attachments?: Array<{ url?: string; publicId?: string; width?: number; height?: number; format?: string; bytes?: number }>;
+    };
 
     // Validate inputs
     if (!title || !body) {
@@ -235,9 +243,9 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // Normalize tags: array of trimmed non-empty strings, max 10
+    // Normalize tags: array of trimmed non-empty strings, max 3
     const safeTags: string[] = Array.isArray(tags)
-      ? tags.map((t: unknown) => String(t).trim()).filter(Boolean).slice(0, 10)
+      ? tags.map((t: unknown) => String(t).trim()).filter(Boolean).slice(0, 3)
       : [];
 
     // ── Server-side duplicate check ──────────────────────────────────────────
@@ -261,6 +269,44 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       console.warn('Failed to generate embedding for post:', (err as Error).message);
     }
 
+    // Validate attachments: cap at 4, drop malformed entries, ensure URLs
+    // are on our Cloudinary account. Cloudinary's free plan caps the asset
+    // count + size, so we hard-limit per post to keep the feed reasonable.
+    const MAX_ATTACHMENTS = 4;
+    let safeAttachments: Array<{ url: string; publicId: string; width?: number; height?: number; format?: string; bytes?: number }> = [];
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      if (attachments.length > MAX_ATTACHMENTS) {
+        res.status(400).json({ message: `At most ${MAX_ATTACHMENTS} image attachments per post.` });
+        return;
+      }
+      // Validate that every URL is on our Cloudinary. Lazy import — most
+      // posts have no attachments and shouldn't pay the import cost.
+      let cfg: { cloudName: string };
+      try {
+        const { getCloudinaryConfig } = await import('../utils/cloudinary.js');
+        cfg = getCloudinaryConfig();
+      } catch (e) {
+        res.status(503).json({ message: (e as Error).message });
+        return;
+      }
+      const { isOurCloudinaryAsset } = await import('../utils/cloudinary.js');
+      for (const a of attachments) {
+        if (!a?.url || !a?.publicId) continue;
+        if (!isOurCloudinaryAsset(a.url, cfg.cloudName)) {
+          res.status(400).json({ message: 'attachment.url must be a valid Cloudinary URL for this account.' });
+          return;
+        }
+        safeAttachments.push({
+          url: a.url,
+          publicId: a.publicId,
+          width: a.width,
+          height: a.height,
+          format: a.format,
+          bytes: a.bytes,
+        });
+      }
+    }
+
     // Create post linked to the authenticated user with a default 'unanswered' status
     const post = await CommunityPost.create({
       title: sanitizeHtml(title),
@@ -269,6 +315,17 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       status: 'unanswered',
       embedding,
       tags: safeTags,
+      attachments: safeAttachments,
+      lifecycle: {
+        status: 'open',
+        statusHistory: [{
+          from: '',
+          to: 'open',
+          changedBy: req.user!._id,
+          changedAt: new Date(),
+          note: 'Question created',
+        }],
+      },
     });
 
     // Hydrate the author field before sending back the response
@@ -314,7 +371,7 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
         try {
           const eligible = await checkPromotionEligibility(updated ?? post);
           if (eligible && !(updated ?? post).promotionPendingAt) {
-            await startPromotionReview(updated ?? post);
+            await startPromotionReview(updated ?? post, userId);
             logger.info(`Post ${(updated ?? post)._id} crossed threshold, entered promotion review`);
           }
         } catch (e) {
@@ -340,10 +397,10 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
         triggeredBy: req.user!._id,
         triggeredByName: req.user!.name,
       }).catch(() => {});
-      // Award +5 points to post author for receiving upvote (atomic, race-safe)
+      // Award +2 points to post author for receiving question upvote (knowledge-lifecycle-design.md)
       const updatedAuthor = await User.findByIdAndUpdate(
         post.author,
-        { $inc: { points: 5, reputation: 5 } },
+        { $inc: { points: 2, reputation: 2 } },
         { new: true }
       );
       if (updatedAuthor) {
@@ -354,8 +411,8 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
       }
       await ReputationLog.create({
         userId: post.author,
-        delta: 5,
-        reason: `Upvote received on post "${post.title.slice(0, 40)}"`,
+        delta: 2,
+        reason: `Question upvote received: "${post.title.slice(0, 40)}"`,
         action: 'upvote_received',
         targetId: post._id as Types.ObjectId,
         targetType: 'community_post',
@@ -388,6 +445,17 @@ export const resolvePost = async (req: Request, res: Response): Promise<void> =>
 
     post.status = 'answered';
     post.answer = answer.trim();
+    // Lifecycle: transition to 'answered' stage
+    if (post.lifecycle?.status === 'open') {
+      (post.lifecycle.statusHistory ??= []).push({
+        from: 'open',
+        to: 'answered',
+        changedBy: req.user!._id,
+        changedAt: new Date(),
+        note: 'Post resolved / answer accepted',
+      });
+      post.lifecycle.status = 'answered';
+    }
     // Clear any pending escalation — answering resolves the issue
     post.escalationStatus = 'none';
     post.escalatedAt = null;
@@ -407,7 +475,7 @@ export const resolvePost = async (req: Request, res: Response): Promise<void> =>
     try {
       const eligible = await checkPromotionEligibility(post);
       if (eligible) {
-        await startPromotionReview(post);
+        await startPromotionReview(post, req.user!._id.toString());
         logger.info(`Resolved post ${post._id} entered promotion review`, { postId: post._id.toString() });
       }
     } catch (e) {
@@ -417,7 +485,7 @@ export const resolvePost = async (req: Request, res: Response): Promise<void> =>
     // ── Notify post author ────────────────────────────────────────────────────
     dispatchNotification({
       recipientId: post.author,
-      eventType: 'accepted_answer',
+      eventType: 'post_resolved',
       link: `/community?post=${post._id}`,
       title: 'Your question was resolved!',
     }).catch(() => {});
@@ -572,12 +640,22 @@ export const convertCommunityPostToFAQ = async (req: Request, res: Response): Pr
 };
 
 // POST /api/community/:id/report — Report a community post
+// Reason must be one of the spec's closed set: spam | duplicate | abuse | other
+const VALID_REPORT_REASONS = ['spam', 'duplicate', 'abuse', 'other'] as const;
+type ReportReason = typeof VALID_REPORT_REASONS[number];
+
 export const reportPost = async (req: Request<{ id: string }, {}, { reason: string }>, res: Response): Promise<void> => {
   if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
   try {
     const { reason } = req.body;
     if (!reason || !reason.trim()) {
       res.status(400).json({ message: 'Reason is required.' });
+      return;
+    }
+    if (!VALID_REPORT_REASONS.includes(reason as ReportReason)) {
+      res.status(400).json({
+        message: `Reason must be one of: ${VALID_REPORT_REASONS.join(', ')}`,
+      });
       return;
     }
 
@@ -637,281 +715,7 @@ export const getSolvedPosts = async (req: Request, res: Response): Promise<void>
   }
 };
 
-// ─── Duplicate Detection ──────────────────────────────────────────────────────
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-const DUPLICATE_VECTOR_THRESHOLD = 0.85;    // cosine similarity minimum
-const DUPLICATE_TEXT_THRESHOLD = 0.50;      // TF-IDF cosine minimum
-const DUPLICATE_SHORT_QUERY_THRESHOLD = 0.90;
-
-// Stop words — highly common English + programming terms that cause noise
-const STOP_WORDS = new Set([
-  'i', 'a', 'an', 'the', 'is', 'it', 'to', 'of', 'in', 'for', 'on', 'with',
-  'my', 'we', 'you', 'do', 'can', 'be', 'are', 'as', 'at', 'by', 'if', 'or',
-  'not', 'how', 'what', 'when', 'where', 'why', 'will', 'get', 'got', 'have',
-  'has', 'had', 'do', 'does', 'did', 'this', 'that', 'these', 'those', 'from',
-  'up', 'out', 'about', 'who', 'which', 'but', 'they', 'he', 'she', 'his', 'her',
-  'all', 'some', 'any', 'would', 'could', 'should', 'there', 'here', 'their',
-  'them', 'been', 'being', 'am', 'was', 'were', 'so', 'no', 'yes', 'may',
-  'please', 'thanks', 'thank', 'hi', 'hello', 'hey', 'dear', 'sorry',
-  // common programming/generic terms that add noise in this domain
-  'access', 'server', 'servers', 'production', 'production', 'access',
-  'use', 'using', 'used', 'want', 'need', 'like', 'just', 'also', 'one',
-  'two', 'new', 'want', 'know', 'work', 'working', 'help', 'question',
-]);
-
-// Terms that should never be counted as "significant" for matching
-const GENERIC_TERMS = new Set([
-  'offer', 'letter', 'access', 'server', 'production', 'question',
-  'help', 'issue', 'problem', 'error', 'please', 'thanks', 'urgent',
-]);
-
-export interface DuplicateMatch {
-  _id: string;
-  title: string;
-  question?: string;
-  answer?: string;
-  body?: string;
-  score: number;
-  source: 'faq' | 'community' | 'knowledge';
-  sourceTitle?: string;
-  confidence?: number;
-  reason?: string;
-  matchType: 'vector' | 'text' | 'ai';
-}
-
-// ─── Text helpers ─────────────────────────────────────────────────────────────
-
-function normalizeWord(w: string): string {
-  return w.replace(/(ing|s|ed|es|e)$/, '').toLowerCase();
-}
-
-function significantWords(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s'-]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w) && !GENERIC_TERMS.has(w));
-}
-
-function wordOverlap(queryWords: string[], targetWords: string[]): { overlap: number; total: number; jaccard: number } {
-  const qSet = new Set(queryWords.map(normalizeWord));
-  const tSet = new Set(targetWords.map(normalizeWord));
-  const qNorm = new Set([...qSet].filter((w) => !GENERIC_TERMS.has(w)));
-  const tNorm = new Set([...tSet].filter((w) => !GENERIC_TERMS.has(w)));
-
-  let overlap = 0;
-  for (const w of qNorm) {
-    if (tNorm.has(w)) overlap++;
-  }
-  const total = Math.min(qNorm.size, tNorm.size);
-  const jaccard = total > 0 ? overlap / total : 0;
-  return { overlap, total, jaccard };
-}
-
-function textMatchScore(query: string, target: string): number {
-  const qWords = significantWords(query);
-  const tWords = significantWords(target);
-  if (qWords.length === 0 || tWords.length === 0) return 0;
-  const { overlap, jaccard } = wordOverlap(qWords, tWords);
-  if (overlap < 2) return 0; // require at least 2 significant shared words
-  // Combine Jaccard with overlap ratio
-  const qSet = new Set(qWords);
-  const tSet = new Set(tWords);
-  const overlapRatio = [...qSet].filter((w) => tSet.has(normalizeWord(w))).length / qSet.size;
-  return Math.min(1, (jaccard * 0.5 + overlapRatio * 0.5));
-}
-
-// ─── checkDuplicate ───────────────────────────────────────────────────────────
-
-export async function checkDuplicate(query: string, isShortQuery: boolean): Promise<DuplicateMatch[]> {
-  const matches: DuplicateMatch[] = [];
-  const lower = query.toLowerCase().trim();
-
-  // ── 1. FAQ hybrid search ──────────────────────────────────────────────────
-  try {
-    const queryEmbedding = await generateEmbedding(query).catch(() => null);
-    const vectorThreshold = isShortQuery ? DUPLICATE_SHORT_QUERY_THRESHOLD : DUPLICATE_VECTOR_THRESHOLD;
-
-    const [vectorResults, textResults] = await Promise.all([
-      // Vector search — only run if embedding succeeded
-      queryEmbedding
-        ? FAQ.find({ embedding: { $exists: true, $ne: null }, status: 'approved' })
-            .select('_id question answer category embedding')
-            .lean()
-            .then((faqs) => {
-              const scored = faqs
-                .map((f) => {
-                  const dot = f.embedding!.reduce(
-                    (s: number, v: number, i: number) => s + v * queryEmbedding[i],
-                    0
-                  );
-                  return { faq: f, similarity: dot };
-                })
-                .filter((x) => x.similarity >= vectorThreshold)
-                .sort((a, b) => b.similarity - a.similarity)
-                .slice(0, 5);
-              return scored.map((x) => ({
-                _id: x.faq._id.toString(),
-                title: x.faq.question,
-                question: x.faq.question,
-                answer: x.faq.answer,
-                category: x.faq.category,
-                score: x.similarity,
-                matchType: 'vector' as const,
-              }));
-            })
-        : Promise.resolve([]),
-
-      // Pure text match — TF-IDF Jaccard
-      FAQ.find({ status: 'approved' })
-        .select('_id question answer category')
-        .lean()
-        .then((faqs) => {
-          const scored = faqs
-            .map((f) => {
-              const score = textMatchScore(lower, f.question + ' ' + (f.answer ?? ''));
-              return { faq: f, score };
-            })
-            .filter((x) => x.score >= DUPLICATE_TEXT_THRESHOLD)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 3);
-          return scored.map((x) => ({
-            _id: x.faq._id.toString(),
-            title: x.faq.question,
-            question: x.faq.question,
-            answer: x.faq.answer,
-            category: x.faq.category,
-            score: x.score,
-            matchType: 'text' as const,
-          }));
-        }),
-    ]);
-
-    const seenFaq = new Set<string>();
-    for (const r of [...vectorResults, ...textResults]) {
-      if (!seenFaq.has(r._id)) {
-        seenFaq.add(r._id);
-        matches.push({ ...r, source: 'faq' });
-      }
-    }
-  } catch (err) {
-    console.warn('FAQ duplicate check failed:', (err as Error).message);
-  }
-
-  // ── 2. Community post keyword search ───────────────────────────────────────
-  try {
-    const qWords = significantWords(lower);
-    if (qWords.length > 0) {
-      const textResults = await CommunityPost.find({
-        $or: [
-          { title: { $regex: escapeRegex(lower), $options: 'i' } },
-          ...qWords.slice(0, 8).map((w) => ({ title: { $regex: `\\b${escapeRegex(w)}\\b`, $options: 'i' } })),
-        ],
-      })
-        .select('_id title body status')
-        .lean()
-        .then((posts) => {
-          const scored = posts
-            .map((p) => {
-              const score = textMatchScore(lower, p.title + ' ' + (p.body ?? ''));
-              return { post: p, score };
-            })
-            .filter((x) => x.score >= DUPLICATE_TEXT_THRESHOLD)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 3);
-          return scored.map((x) => ({
-            _id: x.post._id.toString(),
-            title: x.post.title,
-            body: x.post.body,
-            status: x.post.status,
-            score: x.score,
-            matchType: 'text' as const,
-          }));
-        });
-
-      const seenComm = new Set<string>();
-      for (const r of textResults) {
-        if (!seenComm.has(r._id)) {
-          seenComm.add(r._id);
-          matches.push({ ...r, source: 'community' });
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Community duplicate check failed:', (err as Error).message);
-  }
-
-  // Sort by score, return top 5
-  return matches.sort((a, b) => b.score - a.score).slice(0, 5);
-}
-
-// POST /api/community/check-duplicate
-export const checkDuplicateController = async (req: Request, res: Response): Promise<void> => {
-  if (!req.user) { res.status(401).json({ message: "Not authorized" }); return; }
-  try {
-    const { query } = req.body as { query?: string };
-    if (!query?.trim()) {
-      res.json({ isDuplicate: false, matches: [] });
-      return;
-    }
-
-    const q = query.trim();
-
-    // ── Primary: AI-powered semantic duplicate detection (FAQ + community) ─
-    let matches = await detectDuplicatesWithAI(q);
-
-    // ── Also search knowledge base ──────────────────────────────────────────
-    try {
-      const { searchKnowledge } = await import('../services/knowledgeBase.js');
-      const knowledgeMatches = await searchKnowledge(q, 3);
-      for (const km of knowledgeMatches) {
-        matches.push({
-          _id: km._id,
-          title: km.question,
-          question: km.question,
-          answer: km.answer,
-          source: 'knowledge' as const,
-          sourceTitle: km.sourceTitle,
-          score: km.score,
-          confidence: km.confidence,
-          reason: km.reason ?? `From ${km.source}: ${km.answer}`,
-          matchType: 'ai' as const,
-        });
-      }
-    } catch (err) {
-      // Non-fatal: knowledge search is best-effort
-      console.warn('[checkDuplicate] knowledge search failed:', (err as Error).message);
-    }
-
-    // ── Fallback: keyword heuristics if AI + knowledge return nothing ───────
-    if (matches.length === 0) {
-      const words = q.split(' ').filter((w) => w.length >= 3);
-      const isShortQuery = words.length < 3;
-      matches = await checkDuplicate(q, isShortQuery);
-    }
-
-    // Sort combined results by score, dedupe by _id
-    const seen = new Set<string>();
-    const deduped: typeof matches = [];
-    for (const m of matches.sort((a, b) => b.score - a.score)) {
-      if (!seen.has(m._id)) { seen.add(m._id); deduped.push(m); }
-    }
-
-    res.json({
-      isDuplicate: deduped.length > 0,
-      matches: deduped.slice(0, 5),
-      matchCount: deduped.length,
-    });
-  } catch (error) {
-    res.status(500).json({ message: 'Duplicate check failed', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
-  }
-};
-
-// PATCH /api/community/:id/dna — Set/update Solution DNA on a post (author or admin)
+// ─── DNA ────────────────────────────────────────────────────────────────────────
 export const setPostDNA = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
   try {
@@ -969,6 +773,162 @@ export const setPostTags = async (req: Request, res: Response): Promise<void> =>
     await post.save();
 
     res.json({ message: 'Tags updated.', tags: post.tags });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
+  }
+};
+
+// POST /api/community/:id/object-to-promotion — Moderator blocks promotion of a post
+export const objectToPromotion = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
+  try {
+    const { reason } = req.body as { reason?: string };
+    if (!reason?.trim()) { res.status(400).json({ message: 'Reason is required' }); return; }
+
+    const post = await CommunityPost.findById(req.params.id);
+    if (!post) { res.status(404).json({ message: 'Post not found.' }); return; }
+
+    post.promotionObjectedBy = req.user._id;
+    post.promotionObjectedAt = new Date();
+    post.promotionObjectionReason = reason.trim();
+    post.eligibleForPromotion = false;
+    post.promotionPendingAt = null;
+    await post.save();
+
+    res.json({ message: 'Promotion objected. Post removed from promotion queue.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
+  }
+};
+
+// POST /api/community/:id/confirm-spam — Admin: confirm spam report → -20 pts to author
+// Per spec: "Spam Report Confirmed: -20 points"
+export const confirmSpam = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
+  try {
+    const post = await CommunityPost.findById(req.params.id);
+    if (!post) { res.status(404).json({ message: 'Post not found.' }); return; }
+
+    const offenderId = post.author?.toString();
+    if (offenderId) {
+      const offender = await User.findById(offenderId);
+      if (offender) {
+        offender.points = Math.max(0, offender.points - 20);
+        offender.reputation = offender.points;
+        offender.tier = calculateTier(offender.points);
+        await offender.save();
+
+        await ReputationLog.create({
+          userId: new Types.ObjectId(offenderId),
+          delta: -20,
+          reason: `Spam report confirmed on post "${post.title.slice(0, 40)}"`,
+          action: 'spam_confirmed',
+          targetId: post._id as Types.ObjectId,
+          targetType: 'community_post',
+          awardedBy: req.user._id,
+        });
+      }
+    }
+
+    // Soft-clear: mark as resolved; keep the post for audit trail
+    post.escalationStatus = 'resolved';
+    post.escalationResolvedAt = new Date();
+    post.escalationResolvedBy = req.user._id;
+    post.escalationOutcome = 'spam_confirmed';
+    post.lifecycle ??= { status: 'open', statusHistory: [] };
+    post.lifecycle.statusHistory.push({
+      from: post.lifecycle.status,
+      to: post.lifecycle.status,
+      changedBy: req.user._id,
+      changedAt: new Date(),
+      note: 'Spam confirmed — author penalized -20 pts',
+    });
+    await post.save();
+
+    res.json({ message: 'Spam confirmed. -20 points deducted from author.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
+  }
+};
+
+// POST /api/community/:id/hide — Admin/Mod: hide a post from public lists
+// (Per spec moderation actions: Hide / Lock / Merge / Delete)
+export const hidePost = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
+  try {
+    const { reason } = req.body as { reason?: string };
+    const post = await CommunityPost.findById(req.params.id);
+    if (!post) { res.status(404).json({ message: 'Post not found.' }); return; }
+    post.isHidden = true;
+    post.hiddenAt = new Date();
+    post.hiddenBy = req.user._id;
+    post.hiddenReason = reason?.trim() || null;
+    post.lifecycle ??= { status: 'open', statusHistory: [] };
+    post.lifecycle.statusHistory.push({
+      from: post.lifecycle.status, to: post.lifecycle.status,
+      changedBy: req.user._id, changedAt: new Date(),
+      note: `Hidden by admin${reason ? `: ${reason}` : ''}`,
+    });
+    await post.save();
+    res.json({ message: 'Post hidden.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
+  }
+};
+
+// POST /api/community/:id/unhide — Admin/Mod: reverse a hide
+export const unhidePost = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
+  try {
+    const post = await CommunityPost.findById(req.params.id);
+    if (!post) { res.status(404).json({ message: 'Post not found.' }); return; }
+    post.isHidden = false;
+    post.hiddenAt = null;
+    post.hiddenBy = null;
+    post.hiddenReason = null;
+    await post.save();
+    res.json({ message: 'Post unhidden.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
+  }
+};
+
+// POST /api/community/:id/lock — Admin/Mod: lock a thread (no new comments)
+export const lockPost = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
+  try {
+    const { reason } = req.body as { reason?: string };
+    const post = await CommunityPost.findById(req.params.id);
+    if (!post) { res.status(404).json({ message: 'Post not found.' }); return; }
+    post.isLocked = true;
+    post.lockedAt = new Date();
+    post.lockedBy = req.user._id;
+    post.lockedReason = reason?.trim() || null;
+    post.lifecycle ??= { status: 'open', statusHistory: [] };
+    post.lifecycle.statusHistory.push({
+      from: post.lifecycle.status, to: post.lifecycle.status,
+      changedBy: req.user._id, changedAt: new Date(),
+      note: `Locked by admin${reason ? `: ${reason}` : ''}`,
+    });
+    await post.save();
+    res.json({ message: 'Post locked.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
+  }
+};
+
+// POST /api/community/:id/unlock — Admin/Mod: reverse a lock
+export const unlockPost = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
+  try {
+    const post = await CommunityPost.findById(req.params.id);
+    if (!post) { res.status(404).json({ message: 'Post not found.' }); return; }
+    post.isLocked = false;
+    post.lockedAt = null;
+    post.lockedBy = null;
+    post.lockedReason = null;
+    await post.save();
+    res.json({ message: 'Post unlocked.' });
   } catch (error) {
     res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
   }

@@ -20,6 +20,7 @@ export interface IPromotionMetadata {
 export interface IFAQ extends Document {
   question: string;
   answer: string;
+  tags: string[];
   category: string;
   embedding?: number[];
   searchCount: number;
@@ -59,6 +60,8 @@ export interface IFAQ extends Document {
   // Zoom transcript provenance (when sourceType === 'zoom_transcript')
   sourceMeetingId: Types.ObjectId | null;
   sourceMeetingTopic: string | null;
+  /** The ZoomInsight record this FAQ was promoted from (for traceability) */
+  sourceInsightId: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -73,6 +76,10 @@ const faqSchema = new MongooseSchema(
     answer: {
       type: String,
       required: [true, 'Answer is required'],
+    },
+    tags: {
+      type: [String],
+      default: [],
     },
     category: {
       type: String,
@@ -185,6 +192,11 @@ const faqSchema = new MongooseSchema(
     },
     sourceMeetingTopic: {
       type: String,
+      default: null,
+    },
+    sourceInsightId: {
+      type: MongooseSchema.Types.ObjectId,
+      ref: 'ZoomInsight',
       default: null,
     },
     sourceCommunityPostId: {

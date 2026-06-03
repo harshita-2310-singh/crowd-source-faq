@@ -8,8 +8,22 @@ type UserRole = 'admin' | 'moderator' | 'user' | 'ai_moderator' | 'expert';
 interface AdminUser { _id: string; name: string; email: string; role: UserRole; createdAt: string; updatedAt: string; points?: number; reputation?: number; tier?: string; positiveBadges?: Array<{ badgeId: { _id: string; name: string; slug: string; icon: string; description: string }; awardedAt?: string; reason?: string }>; negativeBadges?: Array<{ badgeId: { _id: string; name: string; slug: string; icon: string }; awardedAt?: string; reason?: string }>; isBanned?: boolean; suspendedUntil?: string; }
 interface UsersApiResponse { users: AdminUser[]; total: number; pages: number; }
 
-const TIER_COLORS: Record<string, string> = { newcomer: 'bg-gray-100 text-gray-600', bronze: 'bg-amber-100 text-amber-700', silver: 'bg-slate-100 text-slate-600', gold: 'bg-yellow-100 text-yellow-700', platinum: 'bg-indigo-100 text-indigo-700', legend: 'bg-violet-100 text-violet-700' };
-const TIER_ICONS: Record<string, string> = { newcomer: '🌱', bronze: '🥉', silver: '🥈', gold: '🥇', platinum: '💎', legend: '👑' };
+const TIER_COLORS: Record<string, string> = {
+  newcomer:       'bg-gray-100 text-gray-600',
+  contributor:   'bg-amber-100 text-amber-700',
+  helper:        'bg-slate-100 text-slate-600',
+  expert:        'bg-yellow-100 text-yellow-700',
+  champion:      'bg-indigo-100 text-indigo-700',
+  knowledge_master: 'bg-violet-100 text-violet-700',
+};
+const TIER_ICONS: Record<string, string> = {
+  newcomer:       '🌱',
+  contributor:   '🥉',
+  helper:        '🥈',
+  expert:        '🥇',
+  champion:      '💎',
+  knowledge_master: '👑',
+};
 
 function timeAgo(d: string) { const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000); if (m < 1) return 'just now'; if (m < 60) return `${m}m ago`; const h = Math.floor(m / 3600); if (h < 24) return `${h}h ago`; return `${Math.floor(h / 24)}d ago`; }
 
@@ -80,8 +94,8 @@ function UserDetailModal({ user, onClose, onRefresh }: { user: AdminUser; onClos
             <div>
               <p className="text-[10px] font-semibold text-gray-500 uppercase mb-1.5">Tier Progress</p>
               <div className="flex items-center gap-2">
-                {['newcomer','bronze','silver','gold','platinum','legend'].map((t, i, arr) => {
-                  const thresholds: Record<string, number> = { newcomer: 0, bronze: 50, silver: 200, gold: 500, platinum: 1000, legend: 2500 };
+                {['newcomer','contributor','helper','expert','champion','knowledge_master'].map((t, i, arr) => {
+                  const thresholds: Record<string, number> = { newcomer: 0, contributor: 50, helper: 150, expert: 300, champion: 600, knowledge_master: 1000 };
                   const points = user.points ?? 0;
                   const pct = arr[i + 1] ? Math.min(100, Math.round(((points - thresholds[t]) / (thresholds[arr[i + 1]] - thresholds[t])) * 100)) : 100;
                   return (

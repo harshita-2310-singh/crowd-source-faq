@@ -18,10 +18,12 @@ import reputationRoutes from './routes/reputation.js';
 import moderationRoutes from './routes/moderation.js';
 import zoomRoutes from './routes/zoom.js';
 import knowledgeRoutes from './routes/knowledge.js';
+import uploadRoutes from './routes/upload.js';
 import { ingestFrontendLog } from './utils/fileLogger.js';
 import { logger } from './utils/logger.js';
 import { requestLogger } from './utils/requestLogger.js';
 import { startEscalationScheduler, stopEscalationScheduler } from './controllers/escalationController.js';
+import { runFreshnessCheck } from './controllers/freshnessController.js';
 import { runPromotionCycle } from './services/promotionService.js';
 import { getMetrics } from './utils/metrics.js';
 import { runWithContext } from './utils/requestContext.js';
@@ -128,6 +130,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/notifications/tea', teaRoutes);
 app.use('/api/zoom', zoomRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // 6. Health Check Endpoint
 // Useful for deployment platforms (like Vercel/AWS) to verify the server is alive
@@ -254,17 +257,48 @@ function validateEnv(): void {
 // Prevents direct listening in production if deployed as a serverless function (e.g., Vercel)
 if (process.env.NODE_ENV !== 'production') {
   validateEnv();
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     logger.info(`Yaksha FAQ Portal backend running on port ${PORT}`);
+
+    // Ensure MongoDB is connected before starting any scheduled tasks
+    try {
+      await connectDB();
+    } catch (e) {
+      logger.error(`Startup DB connect failed: ${(e as Error).message}`);
+    }
+
     startEscalationScheduler();
 
     // Start promotion scheduler — every 15 minutes, idempotent
     const promotionInterval = setInterval(runPromotionCycle, 15 * 60 * 1000);
     runPromotionCycle().catch((e: Error) => logger.error(`Initial promotion cycle: ${e.message}`));
 
+    // Daily FAQ freshness check — auto-flags stale FAQs due for review
+    const freshnessInterval = setInterval(() => runFreshnessCheck().catch((e: Error) => logger.error(`Freshness check: ${e.message}`)), 24 * 60 * 60 * 1000);
+    runFreshnessCheck().catch((e: Error) => logger.error(`Initial freshness check: ${e.message}`));
+
+    // Daily retention policy — cleans old SearchLog, Notification, FreshReviewLog, ModerationLog, AdminLog records
+    const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+    const runRetention = async () => {
+      try {
+        const { cleanSearchLogs, cleanNotifications, cleanFreshReviewLogs, cleanModerationLogs, cleanAdminLogs } = await import('./scripts/retentionPolicy.js');
+        await cleanSearchLogs();
+        await cleanNotifications();
+        await cleanFreshReviewLogs();
+        await cleanModerationLogs();
+        await cleanAdminLogs();
+      } catch (e: unknown) {
+        logger.error(`Retention policy: ${(e as Error).message}`);
+      }
+    };
+    const retentionInterval = setInterval(runRetention, RETENTION_INTERVAL_MS);
+    runRetention().catch((e: Error) => logger.error(`Initial retention policy: ${e.message}`));
+
     // Clean up on shutdown
     const cleanup = () => {
       clearInterval(promotionInterval);
+      clearInterval(freshnessInterval);
+      clearInterval(retentionInterval);
       stopEscalationScheduler();
     };
     process.on('SIGTERM', cleanup);

@@ -3,8 +3,22 @@ import adminApi from '../utils/adminApi';
 
 interface LeaderboardEntry { rank: number; userId: string; name: string; points: number; reputation: number; tier: string; badges: number; joinedAt: string; }
 
-const TIER_COLORS: Record<string, string> = { newcomer: 'bg-gray-100 text-gray-600', bronze: 'bg-amber-100 text-amber-700', silver: 'bg-slate-100 text-slate-600', gold: 'bg-yellow-100 text-yellow-700', platinum: 'bg-indigo-100 text-indigo-700', legend: 'bg-violet-100 text-violet-700' };
-const TIER_ICONS: Record<string, string> = { newcomer: '🌱', bronze: '🥉', silver: '🥈', gold: '🥇', platinum: '💎', legend: '👑' };
+const TIER_COLORS: Record<string, string> = {
+  newcomer:       'bg-gray-100 text-gray-600',
+  contributor:   'bg-amber-100 text-amber-700',
+  helper:        'bg-slate-100 text-slate-600',
+  expert:        'bg-yellow-100 text-yellow-700',
+  champion:      'bg-indigo-100 text-indigo-700',
+  knowledge_master: 'bg-violet-100 text-violet-700',
+};
+const TIER_ICONS: Record<string, string> = {
+  newcomer:       '🌱',
+  contributor:   '🥉',
+  helper:        '🥈',
+  expert:        '🥇',
+  champion:      '💎',
+  knowledge_master: '👑',
+};
 const RANK_COLORS: Record<number, string> = { 1: 'bg-yellow-50 border-yellow-200 text-yellow-800', 2: 'bg-slate-50 border-slate-200 text-slate-700', 3: 'bg-orange-50 border-orange-200 text-orange-700' };
 
 export default function AdminLeaderboard() {

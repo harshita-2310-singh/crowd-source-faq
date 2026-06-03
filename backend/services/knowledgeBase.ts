@@ -14,7 +14,8 @@ import { ZoomMeeting } from '../models/ZoomMeeting.js';
 import CommunityPost from '../models/CommunityPost.js';
 import FAQ from '../models/FAQ.js';
 import { generateEmbedding } from '../utils/embeddings.js';
-import { resolveProvider } from '../utils/aiProvider.js';
+import { resolveProviderAsync } from '../utils/aiProvider.js';
+import { dispatchNotification } from '../utils/notificationDispatcher.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ async function aiChat(
   maxTokens = 1024,
   temperature = 0.1
 ): Promise<string> {
-  const cfg = resolveProvider();
+  const cfg = await resolveProviderAsync();
 
   const body: Record<string, unknown> = {
     model: cfg.model,
@@ -43,9 +44,11 @@ async function aiChat(
     (body as Record<string, unknown>).temperature = temperature;
   }
 
+  // Build auth header — Bearer prefix required by all non-Anthropic providers
+  const authValue = cfg.provider === 'anthropic' ? cfg.apiKey : `Bearer ${cfg.apiKey}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    [cfg.authHeader]: cfg.apiKey,
+    [cfg.authHeader]: authValue,
   };
   if (cfg.needsAnthropicVersion) {
     headers['anthropic-version'] = '2023-06-01';
@@ -172,15 +175,33 @@ export async function processZoomMeetingForKnowledge(meetingId: string): Promise
     sourceId: meeting._id,
     sourceTitle: meeting.topic,
     confidence: qa.confidence,
-    status: 'pending' as KnowledgeStatus,
+    // Zero-human path: auto-approve so these are immediately available for
+    // RAG + search fallback. Admin review is reserved for the curated
+    // ZoomInsight → FAQ pipeline.
+    status: 'approved' as KnowledgeStatus,
     transcriptSnippet: qa.transcriptSnippet,
     keywords: [],
   }));
 
-  await TranscriptKnowledge.insertMany(entries, { ordered: false });
+  const inserted = await TranscriptKnowledge.insertMany(entries, { ordered: false });
+
+  // Inline embedding — ensures entries are vector-searchable the moment
+  // the webhook returns, with no separate worker required. Fails are
+  // logged but don't block the main pipeline; the dedicated
+  // embedUnprocessedKnowledge() worker is a safety net.
+  await Promise.all(inserted.map(async (doc) => {
+    try {
+      const text = `${doc.question} ${doc.answer}`;
+      const emb = await generateEmbedding(text);
+      await TranscriptKnowledge.updateOne({ _id: doc._id }, { embedding: emb });
+    } catch (err) {
+      console.warn(`[knowledgeBase] Inline embed failed for ${doc._id}: ${(err as Error).message}`);
+    }
+  }));
+
   await ZoomMeeting.updateOne({ _id: meeting._id }, { insightCount: qaPairs.length });
 
-  console.log(`[knowledgeBase] Extracted ${qaPairs.length} QA pairs from meeting ${meetingId}`);
+  console.log(`[knowledgeBase] Extracted + embedded ${qaPairs.length} QA pairs from meeting ${meetingId}`);
   return qaPairs.length;
 }
 
@@ -324,6 +345,15 @@ export async function answerFromKnowledge(
     { _id: best._id },
     { answeredFromKnowledgeId: post._id, upvoteCount: (post.upvotes as Types.ObjectId[])?.length ?? 0 }
   );
+
+  // Notify the post author that the knowledge base answered their question.
+  // Best-effort — failure to notify does not block the answer write above.
+  dispatchNotification({
+    recipientId: post.author as Types.ObjectId,
+    eventType: 'faq_match_found',
+    link: `/community?post=${post._id}`,
+    title: 'A matching FAQ answered your question!',
+  }).catch(() => {});
 
   return { answered: true, answer: post.answer, knowledgeId: best._id };
 }

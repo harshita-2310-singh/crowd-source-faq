@@ -26,6 +26,41 @@ function getClientId()     { const v = process.env.ZOOM_CLIENT_ID;     if (!v) t
 function getClientSecret() { const v = process.env.ZOOM_CLIENT_SECRET; if (!v) throw new Error('Missing ZOOM_CLIENT_SECRET env var — add it to backend/.env.local'); return v; }
 function getRedirectUri()  { return process.env.ZOOM_REDIRECT_URI ?? 'http://localhost:6767/api/zoom/auth/callback'; }
 
+/**
+ * Build the Zoom OAuth redirect URI dynamically, based on the incoming request
+ * (origin host + the path that handles the callback). Falls back to the env var
+ * or the hard-coded localhost default if no request context is available.
+ *
+ * This makes the OAuth flow work in any environment (dev, ngrok, staging, prod)
+ * without manually editing ZOOM_REDIRECT_URI for each deployment.
+ *
+ * Behavior:
+ *   - If ZOOM_REDIRECT_URI is set in env, use that as-is (explicit override wins)
+ *   - Otherwise, build from the request: `${proto}://${host}/api/zoom/auth/callback`
+ *     where proto honours X-Forwarded-Proto (for ngrok / reverse proxies)
+ *
+ * The 'request' param can be omitted when called outside an HTTP context (e.g. from a script),
+ * in which case the env var or hard-coded default is used.
+ */
+export function buildDynamicRedirectUri(request?: { headers?: Record<string, string | string[] | undefined>; protocol?: string }): string {
+  // Explicit env var wins — admin has set it deliberately
+  if (process.env.ZOOM_REDIRECT_URI) return process.env.ZOOM_REDIRECT_URI;
+
+  if (!request) {
+    return 'http://localhost:6767/api/zoom/auth/callback';
+  }
+
+  // Pull host (and proto) from the incoming request — works behind ngrok / proxies
+  const forwardedProto = (request.headers?.['x-forwarded-proto'] as string | undefined) ?? '';
+  const forwardedHost  = (request.headers?.['x-forwarded-host']  as string | undefined) ?? '';
+  const hostHeader     = (request.headers?.['host']              as string | undefined) ?? '';
+
+  const host  = forwardedHost || hostHeader || 'localhost:6767';
+  const proto = forwardedProto || request.protocol || (host.includes('localhost') ? 'http' : 'https');
+
+  return `${proto}://${host}/api/zoom/auth/callback`;
+}
+
 // ─── Token encryption helpers ─────────────────────────────────────────────────
 
 /** Encrypt a token before storing it in the database. */
@@ -43,12 +78,17 @@ function decryptToken(encrypted: string): string {
 /**
  * Build the Zoom OAuth authorization URL for a given user.
  * The state param encodes the user's internal ID so we know who to link on callback.
+ *
+ * If a request object is provided, the redirect URI is built dynamically from the
+ * request's host — this is what makes the OAuth flow work across multiple deploy
+ * targets (ngrok, staging, prod) without editing ZOOM_REDIRECT_URI.
  */
-export function buildZoomAuthUrl(internalUserId: string): string {
+export function buildZoomAuthUrl(internalUserId: string, request?: { headers?: Record<string, string | string[] | undefined>; protocol?: string }): string {
+  const redirectUri = buildDynamicRedirectUri(request);
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: getClientId(),
-    redirect_uri: getRedirectUri(),
+    redirect_uri: redirectUri,
     state: Buffer.from(internalUserId).toString('base64'), // encode user ID in state
   });
   return `${ZOOM_AUTH_URL}?${params}`;
@@ -245,4 +285,56 @@ export async function downloadTranscriptAsUser(userId: string, downloadUrl: stri
   });
   if (!res.ok) throw new Error(`Transcript download failed (${res.status})`);
   return res.text();
+}
+
+// ─── Past Recordings (backfill on connect) ────────────────────────────────────
+
+export interface ZoomRecording {
+  uuid: string;
+  id: string;
+  topic: string;
+  startTime: string;
+  duration: number;
+  recordingFiles: {
+    id: string;
+    meetingId: string;
+    recordingStart: string;
+    recordingEnd: string;
+    fileType: string;
+    fileExtension: string;
+    downloadUrl: string;
+  }[];
+}
+
+export interface ListRecordingsResponse {
+  pageSize: number;
+  totalRecords: number;
+  nextPageToken?: string;
+  meetings: ZoomRecording[];
+}
+
+/**
+ * Fetch past cloud recordings for a user.
+ * Used during backfill after first Zoom OAuth connection.
+ *
+ * @param userId    — our internal user ID
+ * @param from      — start date (ISO string), defaults to 90 days ago
+ * @param to        — end date (ISO string), defaults to today
+ * @param pageSize  — results per page (max 300)
+ */
+export async function getPastRecordings(
+  userId: string,
+  from?: string,
+  to?: string,
+  pageSize = 50,
+): Promise<ZoomRecording[]> {
+  const toDate   = to   ?? new Date().toISOString().split('T')[0];
+  const fromDate = from ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  const data = await zoomApiAsUser<ListRecordingsResponse>(
+    userId,
+    `/users/me/recordings?from=${fromDate}&to=${toDate}&page_size=${Math.min(pageSize, 300)}`,
+  );
+
+  return data.meetings ?? [];
 }

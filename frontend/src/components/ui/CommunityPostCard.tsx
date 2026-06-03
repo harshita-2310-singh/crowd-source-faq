@@ -2,19 +2,32 @@ import React from 'react';
 import Badge from './Badge';
 import { useAuth } from '../../hooks/useAuth';
 import type { Post } from '../../types/ui';
+import { buildTransformedUrl, type CloudinaryAsset } from '../../hooks/useCloudinaryUpload';
 
 const formatDate = (dateStr: string): string => {
   const d = new Date(dateStr);
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
+// ─── Lifecycle chip config ────────────────────────────────────────────────────
+const LIFECYCLE_CONFIG: Record<string, { label: string; cls: string }> = {
+  open:               { label: 'Open',              cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+  answered:           { label: 'Solved',            cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  community_accepted: { label: 'Community ✓',       cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  ai_validated:       { label: 'AI Validated',      cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+  admin_accepted:     { label: 'Admin Approved',    cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  converted_to_faq:   { label: 'Official FAQ',      cls: 'bg-stone-100 text-stone-700 border-stone-300' },
+};
+
 interface CommunityPostCardProps {
   post: Post;
   onClick?: (post: Post) => void;
   currentUserId?: string;
+  /** Called when the user clicks the bookmark toggle. Card does NOT update its own bookmark state. */
+  onToggleBookmark?: (postId: string) => void;
 }
 
-export default function CommunityPostCard({ post, onClick, currentUserId }: CommunityPostCardProps) {
+export default function CommunityPostCard({ post, onClick, currentUserId, onToggleBookmark }: CommunityPostCardProps) {
   const isAnswered = post.status === 'answered';
   const upvoteCount = (post.upvotes?.length ?? 0) as number;
   const commentCount = (post.comments?.length ?? 0) as number;
@@ -26,15 +39,13 @@ export default function CommunityPostCard({ post, onClick, currentUserId }: Comm
   const { user } = useAuth();
   const isPrivileged = user?.role === 'admin' || user?.role === 'moderator';
 
-  const timeTrial = post.timeTrialStatus;
-  const showTimeTrial = isPrivileged && timeTrial === 'pending';
-  const showAwardedTrial = isPrivileged && timeTrial === 'awarded';
+  // Time-Trial countdown is hidden on the public community list — only admins see it inside a thread.
+  // (was: showTimeTrial = isPrivileged && timeTrial === 'pending')
+  const showAwardedTrial = isPrivileged && post.timeTrialStatus === 'awarded';
   const showEscalated = isPrivileged && post.escalationStatus === 'escalated';
 
-  // Card border color — urgent red for active time-trial, gold for awarded, red-striped for escalated
-  const cardBorder = showTimeTrial
-    ? 'border-l-4 border-l-red-400'
-    : showAwardedTrial
+  // Card border color — gold for awarded, red-striped for escalated
+  const cardBorder = showAwardedTrial
     ? 'border-l-4 border-l-yellow-400'
     : showEscalated
     ? 'border-l-4 border-l-red-500'
@@ -47,14 +58,10 @@ export default function CommunityPostCard({ post, onClick, currentUserId }: Comm
                  card-hover group transition-all duration-300 ${cardBorder}`}
     >
       <div className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5
-                       ${isAnswered ? 'bg-success-light text-success' : showTimeTrial ? 'bg-red-50 text-red-400' : 'bg-warning-light text-warning'}`}>
+                       ${isAnswered ? 'bg-success-light text-success' : 'bg-warning-light text-warning'}`}>
         {isAnswered ? (
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M3 8L6.5 11.5L13 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        ) : showTimeTrial ? (
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M8 2L9 6H13L9.5 8.5L10.5 12.5L8 10L5.5 12.5L6.5 8.5L3 6H7L8 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
           </svg>
         ) : (
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -71,15 +78,42 @@ export default function CommunityPostCard({ post, onClick, currentUserId }: Comm
         </p>
         <p className="mt-1 text-xs text-ink-soft leading-relaxed line-clamp-1">{post.body}</p>
 
-        <div className="mt-2 flex items-center gap-2 flex-wrap">
-          {showTimeTrial && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-600 text-xs font-semibold">
-              ⚡ Time-Trial
-              {post.timeTrialHoursRemaining != null && (
-                <span className="font-mono"> {post.timeTrialHoursRemaining}h left</span>
+        {post.tags && post.tags.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {post.tags.slice(0, 3).map((tag: string) => (
+              <span key={tag} className="inline-flex items-center px-2 py-0.5 rounded-full bg-accent/10 border border-accent/20 text-[11px] font-medium text-accent">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Image attachments — Cloudinary thumbnails */}
+        {(() => {
+          const atts = (post as Post & { attachments?: CloudinaryAsset[] }).attachments;
+          if (!Array.isArray(atts) || atts.length === 0) return null;
+          return (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {atts.slice(0, 4).map((a) => (
+                <div key={a.publicId} className="w-14 h-14 rounded-lg overflow-hidden border border-border bg-mist">
+                  <img
+                    src={buildTransformedUrl(a.url, 'w_120,h_120,c_fill,q_auto,f_auto')}
+                    alt="attachment"
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                </div>
+              ))}
+              {atts.length > 4 && (
+                <div className="w-14 h-14 rounded-lg border border-border bg-mist flex items-center justify-center text-xs font-semibold text-ink-soft">
+                  +{atts.length - 4}
+                </div>
               )}
-            </span>
-          )}
+            </div>
+          );
+        })()}
+
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
           {showAwardedTrial && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-50 border border-yellow-300 text-yellow-700 text-xs font-semibold">
               🏅 First Responder Won
@@ -93,6 +127,11 @@ export default function CommunityPostCard({ post, onClick, currentUserId }: Comm
           <Badge variant={isAnswered ? 'success' : 'warning'}>
             {isAnswered ? '✓ Answered' : '○ Open'}
           </Badge>
+          {post.lifecycle?.status && LIFECYCLE_CONFIG[post.lifecycle.status] && (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded border text-[10px] font-semibold ${LIFECYCLE_CONFIG[post.lifecycle.status].cls}`}>
+              {LIFECYCLE_CONFIG[post.lifecycle.status].label}
+            </span>
+          )}
           <span className="text-xs text-ink-faint">{post.author?.name || 'Student'}</span>
           <span className="text-ink-faint text-xs">·</span>
           <span className="text-xs text-ink-faint">{formatDate(post.createdAt || '')}</span>
@@ -108,6 +147,18 @@ export default function CommunityPostCard({ post, onClick, currentUserId }: Comm
             </svg>
             {commentCount}
           </span>
+          {post.bookmarks && post.bookmarks.length > 0 && onToggleBookmark && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleBookmark(post._id); }}
+              className="flex items-center gap-1 text-xs text-accent font-medium"
+              title="Remove bookmark"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 2.5C2 1.67 2.67 1 3.5 1h5C9.33 1 10 1.67 10 2.5v7.5L7 8.5 4 10V2.5z" strokeLinejoin="round"/>
+              </svg>
+              {post.bookmarks.length}
+            </button>
+          )}
         </div>
 
         {/* DNA Strip for answered posts */}

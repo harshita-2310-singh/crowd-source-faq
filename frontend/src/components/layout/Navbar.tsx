@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useAuthModal, useAuthGate } from '../../context/AuthModalContext';
+import { buildTransformedUrl } from '../../hooks/useCloudinaryUpload';
 import NotificationBell from '../../components/ui/NotificationBell';
 
 const navItems = [
   { label: 'Home', to: '/' },
   { label: 'FAQ', to: '/faq' },
   { label: 'Community', to: '/community' },
+  { label: 'Saved', to: '/saved' },
   { label: 'Leaderboard', to: '/leaderboard' },
 ];
 
@@ -22,12 +25,14 @@ function getAvatarColor(name?: string): string {
 
 export default function Navbar() {
   const { user, isAuthenticated, logout } = useAuth();
+  const { openModal } = useAuthModal();
   const navigate = useNavigate();
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const gate = useAuthGate();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -52,12 +57,23 @@ export default function Navbar() {
   }, [profileOpen]);
 
   const handleLogout = () => {
+    setProfileOpen(false);
     logout();
-    navigate('/login');
+    // Stay on current page — the user is just logged out, not navigated.
   };
+
+  const handleAskQuestion = gate(() => {
+    navigate('/community?ask=true');
+  }, 'Sign in to ask a question in the community.');
 
   const initials = user?.name ? user.name.charAt(0).toUpperCase() : '?';
   const avatarColor = getAvatarColor(user?.name);
+  // Thumbnail transform — cap the navbar avatar at 64×64 so we're not
+  // downloading the full-size upload on every page. Cloudinary returns
+  // a transformed URL, no extra round-trip.
+  const avatarSrc = user?.avatar?.url
+    ? buildTransformedUrl(user.avatar.url, 'w_64,h_64,c_fill,g_auto,q_auto,f_auto')
+    : undefined;
   const isCommunityActive = location.pathname === '/community';
 
   return (
@@ -103,20 +119,44 @@ export default function Navbar() {
         {/* Right Side */}
         <div className="flex items-center gap-2 flex-shrink-0">
 
-        {/* Unauthenticated — show Sign in / Register */}
+          {/* Ask AI — placeholder for the upcoming floating chat widget. */}
+          <button
+            disabled
+            title="AI chat — coming soon"
+            className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-ink-faint border border-dashed border-border rounded-full cursor-not-allowed opacity-70"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 2l1.5 4.5L18 8l-4.5 1.5L12 14l-1.5-4.5L6 8l4.5-1.5L12 2z"/>
+              <path d="M19 14l.8 2.4L22 17l-2.2.6L19 20l-.8-2.4L16 17l2.2-.6L19 14z"/>
+            </svg>
+            Ask AI
+            <span className="text-[9px] font-semibold text-ink-faint bg-mist px-1.5 py-0.5 rounded-full">SOON</span>
+          </button>
+
+          {/* Ask Question — always visible. Logged-out users get the auth modal via `gate`. */}
+          {!isCommunityActive && (
+            <button
+              onClick={handleAskQuestion}
+              className="hidden lg:flex items-center px-5 py-[7px] text-[0.82rem] font-semibold text-ink bg-transparent border-[1.5px] border-ink rounded-full cursor-pointer transition-all duration-300 ease-smooth tracking-[0.01em] leading-none hover:bg-ink hover:text-white hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] hover:-translate-y-px active:translate-y-0"
+            >
+              Ask Question
+            </button>
+          )}
+
+        {/* Unauthenticated — Sign in (text) + Get started (filled) */}
         {!isAuthenticated && (
           <div className="hidden lg:flex items-center gap-2">
             <button
-              onClick={() => navigate('/login')}
-              className="px-4 py-1.5 text-sm font-medium text-ink-soft hover:text-ink transition-colors"
+              onClick={() => openModal('signin')}
+              className="px-3 py-1.5 text-sm font-medium text-ink-soft hover:text-ink transition-colors"
             >
               Sign in
             </button>
             <button
-              onClick={() => navigate('/register')}
+              onClick={() => openModal('register')}
               className="px-4 py-1.5 text-sm font-semibold bg-accent text-white rounded-full hover:bg-accent-hover transition-colors"
             >
-              Register
+              Get started
             </button>
           </div>
         )}
@@ -124,15 +164,6 @@ export default function Navbar() {
         {/* Authenticated */}
         {isAuthenticated && (
           <>
-            {!isCommunityActive && (
-              <button
-                onClick={() => navigate('/community?ask=true')}
-                className="hidden lg:flex items-center px-5 py-[7px] text-[0.82rem] font-semibold text-ink bg-transparent border-[1.5px] border-ink rounded-full cursor-pointer transition-all duration-300 ease-smooth tracking-[0.01em] leading-none hover:bg-ink hover:text-white hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] hover:-translate-y-px active:translate-y-0"
-              >
-                Ask Question
-              </button>
-            )}
-
             <div className="hidden lg:block w-px h-6 bg-border mx-1" />
 
             <NotificationBell />
@@ -143,12 +174,21 @@ export default function Navbar() {
                 onClick={(e) => { e.stopPropagation(); setProfileOpen(!profileOpen); }}
                 className="flex items-center gap-1.5 cursor-pointer group"
               >
-                <div
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shadow-[0_0_0_2px_#fff,0_1px_4px_rgba(0,0,0,0.08)] transition-transform duration-200 group-hover:scale-105"
-                  style={{ backgroundColor: avatarColor }}
-                >
-                  {initials}
-                </div>
+                {avatarSrc ? (
+                  <img
+                    src={avatarSrc}
+                    alt={user?.name ? `${user.name} avatar` : 'avatar'}
+                    className="w-9 h-9 rounded-full object-cover shadow-[0_0_0_2px_#fff,0_1px_4px_rgba(0,0,0,0.08)] transition-transform duration-200 group-hover:scale-105"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shadow-[0_0_0_2px_#fff,0_1px_4px_rgba(0,0,0,0.08)] transition-transform duration-200 group-hover:scale-105"
+                    style={{ backgroundColor: avatarColor }}
+                  >
+                    {initials}
+                  </div>
+                )}
                 <svg
                   width="12" height="12" viewBox="0 0 24 24" fill="none"
                   stroke="#6b6b6b" strokeWidth="2.5"
@@ -217,7 +257,7 @@ export default function Navbar() {
       {/* Mobile Dropdown */}
       <div
         className={`lg:hidden overflow-hidden transition-all duration-[350ms] ease-smooth ${
-          mobileOpen ? 'max-h-80 opacity-100' : 'max-h-0 opacity-0'
+          mobileOpen ? 'max-h-[28rem] opacity-100' : 'max-h-0 opacity-0'
         }`}
         style={{
           backgroundColor: 'rgba(255,255,255,0.95)',
@@ -238,29 +278,56 @@ export default function Navbar() {
                   isActive
                     ? 'bg-accent-light text-accent'
                     : 'text-ink-soft hover:text-ink hover:bg-black/[0.03]'
-                }`}
+                }`
+              }
             >
               {label}
             </NavLink>
           ))}
-          <div className="flex gap-2 mt-3">
-            {!isCommunityActive && isAuthenticated && (
+
+          {/* Mobile: Ask AI placeholder */}
+          <button
+            disabled
+            title="AI chat — coming soon"
+            className="mt-2 w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium text-ink-faint border border-dashed border-border cursor-not-allowed flex items-center gap-2"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 2l1.5 4.5L18 8l-4.5 1.5L12 14l-1.5-4.5L6 8l4.5-1.5L12 2z"/>
+              <path d="M19 14l.8 2.4L22 17l-2.2.6L19 20l-.8-2.4L16 17l2.2-.6L19 14z"/>
+            </svg>
+            Ask AI
+            <span className="text-[9px] font-semibold text-ink-faint bg-mist px-1.5 py-0.5 rounded-full">SOON</span>
+          </button>
+
+          {!isCommunityActive && (
+            <button
+              onClick={() => { handleAskQuestion(); setMobileOpen(false); }}
+              className="w-full py-2.5 px-4 text-sm font-semibold text-ink bg-transparent border-[1.5px] border-ink rounded-full cursor-pointer transition-all hover:bg-ink hover:text-white"
+            >
+              Ask Question
+            </button>
+          )}
+          {!isAuthenticated && (
+            <div className="flex gap-2 mt-2">
               <button
-                onClick={() => { navigate('/community?ask=true'); setMobileOpen(false); }}
-                className="flex-1 py-2.5 px-4 text-sm font-semibold text-ink bg-transparent border-[1.5px] border-ink rounded-full cursor-pointer transition-all hover:bg-ink hover:text-white"
-              >
-                Ask Question
-              </button>
-            )}
-            {!isAuthenticated && (
-              <button
-                onClick={() => { navigate('/login'); setMobileOpen(false); }}
-                className="flex-1 py-2.5 px-4 text-sm font-semibold text-ink bg-transparent border-[1.5px] border-ink rounded-full cursor-pointer transition-all hover:bg-ink hover:text-white"
+                onClick={() => { openModal('signin'); setMobileOpen(false); }}
+                className="flex-1 py-2.5 px-4 text-sm font-semibold text-ink-soft border border-border rounded-full hover:bg-mist transition-colors"
               >
                 Sign in
               </button>
-            )}
-          </div>
+              <button
+                onClick={() => { openModal('register'); setMobileOpen(false); }}
+                className="flex-1 py-2.5 px-4 text-sm font-semibold text-white bg-accent rounded-full hover:bg-accent-hover transition-colors"
+              >
+                Get started
+              </button>
+            </div>
+          )}
+          {isAuthenticated && (
+            <div className="mt-2 px-4 py-2 text-xs text-ink-soft border-t border-border/40">
+              Signed in as <span className="font-medium text-ink">{user?.name}</span>
+            </div>
+          )}
         </div>
       </div>
     </header>

@@ -572,6 +572,7 @@ export default function HomePage() {
   const [activeCategory, setActiveCategory] = useState('');
   const [trending, setTrending] = useState<TrendingQuery[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(true);
+  const [showAllPopular, setShowAllPopular] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [historyFaq, setHistoryFaq] = useState<{ id: string; question: string } | null>(null);
   const searchBarRef = useRef<HTMLInputElement>(null);
@@ -790,12 +791,10 @@ export default function HomePage() {
                           </div>
                         )}
 
-                        {!loading && !searchError && matchingResults.length === 0 && (
+                        {!loading && !searchError && matchingResults.length === 0 && isReadyForResults && (
                           <div className="rounded-2xl border border-dashed border-border bg-white/70 p-4">
                             <p className="text-xs text-ink-soft">
-                              {isReadyForResults
-                                ? 'No matches found. Try a different phrase or ask the community.'
-                                : 'Keep typing to see matching questions.'}
+                              No matches found. Try a different phrase or ask the community.
                             </p>
                           </div>
                         )}
@@ -807,7 +806,7 @@ export default function HomePage() {
                           <p className="text-[11px] text-ink-soft">Ask the community and get help faster.</p>
                         </div>
                         <button
-                          onClick={() => navigate('/community')}
+                          onClick={() => navigate(`/community?ask=true&title=${encodeURIComponent(query.trim())}`)}
                           className="shrink-0 px-3 py-2 rounded-full bg-ink text-white text-[11px] font-semibold hover:bg-ink/85 transition-colors"
                         >
                           Ask community
@@ -838,33 +837,40 @@ export default function HomePage() {
                         <p className="text-[11px] font-semibold text-ink-faint uppercase tracking-wide">
                           Popular searches
                         </p>
-                        <div className="mt-2 space-y-1">
+                        <div className="mt-2 flex flex-wrap gap-2">
                           {trendingLoading && (
                             [1, 2, 3].map((i) => (
-                              <div key={i} className="h-10 rounded-2xl border border-border/60 bg-white/70 animate-pulse" />
+                              <div key={i} className="h-8 w-24 rounded-full border border-border/60 bg-white/70 animate-pulse" />
                             ))
                           )}
 
-                          {!trendingLoading && popularItems.map((item) => (
+                          {!trendingLoading && (showAllPopular ? popularItems : popularItems.slice(0, 5)).map((item) => (
                             <button
                               key={item.query}
                               onClick={() => handleQuickSearch(item.query)}
-                              className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-2xl border border-border/60 bg-white/70 text-left hover:bg-cream transition-colors"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border/60 bg-white/70 hover:bg-cream transition-colors group"
                             >
-                              <div className="flex items-center gap-2">
-                                <span className="text-ink-faint">
-                                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                                    <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.4" />
-                                    <path d="M6 3.5V6L8 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                                  </svg>
-                                </span>
-                                <span className="text-sm text-ink capitalize">{item.query}</span>
-                              </div>
+                              <span className="text-ink-faint group-hover:text-leaf transition-colors">
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                  <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.4" />
+                                  <path d="M6 3.5V6L8 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                                </svg>
+                              </span>
+                              <span className="text-sm text-ink capitalize whitespace-nowrap">{item.query}</span>
                               {item.count !== undefined && (
-                                <span className="text-[11px] text-ink-faint">{item.count}</span>
+                                <span className="text-[11px] text-ink-faint ml-1">{item.count}</span>
                               )}
                             </button>
                           ))}
+
+                          {!trendingLoading && popularItems.length > 5 && (
+                            <button
+                              onClick={() => setShowAllPopular(!showAllPopular)}
+                              className="text-[11px] font-semibold text-leaf hover:underline px-2 py-1.5"
+                            >
+                              {showAllPopular ? 'Show less' : 'View more'}
+                            </button>
+                          )}
                         </div>
                       </div>
 

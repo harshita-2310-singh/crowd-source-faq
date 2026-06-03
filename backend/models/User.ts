@@ -5,8 +5,6 @@ import bcrypt from 'bcryptjs';
 
 export type UserRole = 'user' | 'moderator' | 'admin' | 'ai_moderator' | 'expert';
 
-export type Tier = 'newcomer' | 'bronze' | 'silver' | 'gold' | 'platinum' | 'legend';
-
 export type ReputationAction =
   | 'faq_post'
   | 'faq_approved'
@@ -20,7 +18,11 @@ export type ReputationAction =
   | 'answer_downvoted'
   | 'report_rejected'
   | 'badge_revoked'
-  | 'admin_point_deduct';
+  | 'admin_point_deduct'
+  | 'faq_converted'        // question author: question → FAQ (+15)
+  | 'faq_answer_used'      // answer author: answer used in FAQ (+25)
+  | 'admin_approval_bonus' // question author: admin approved (+10)
+  | 'spam_confirmed';      // user: spam report confirmed (-20)
 
 // ─── Badge subdocument ────────────────────────────────────────────────────────
 
@@ -38,6 +40,11 @@ export interface IUser extends Document {
   role: UserRole;
   createdAt?: Date;
   updatedAt?: Date;
+  // Profile picture (Cloudinary) — `url` is the secure_url; `publicId`
+  // is what we'd send to Cloudinary's `destroy` API if we ever need to
+  // delete the asset server-side. Both optional so existing users still
+  // fall back to the initial-based avatar in the navbar.
+  avatar?: { url: string; publicId: string };
   // Reputation system
   reputation: number;
   points: number;
@@ -60,24 +67,32 @@ export interface IUser extends Document {
     zoomTokenExpiry?: Date;
     zoomConnectedAt?: Date;
     // Admin 2FA / TOTP
-    totpEnabled: boolean;
-    totpSecret?: string; // AES-256-GCM encrypted
-    // Methods
-    comparePassword(candidatePassword: string): Promise<boolean>;
+  totpEnabled: boolean;
+  totpSecret?: string; // AES-256-GCM encrypted
+  // Bookmarked community posts — NOT used for reputation scoring
+  bookmarks: MongooseSchema.Types.ObjectId[];
+  // Denormalized counts for leaderboard trust score (updated on write, not computed per-request)
+  acceptedAnswers: number;
+  faqContributions: number;
+  // Methods
+  comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
-// ─── Tier thresholds ──────────────────────────────────────────────────────────
+export type Tier = 'newcomer' | 'contributor' | 'helper' | 'expert' | 'champion' | 'knowledge_master';
+
+// ─── Tier thresholds (knowledge-lifecycle-design.md) ─────────────────────────
+// Points-based badges auto-awarded by reputationController.autoAwardBadges
 
 export const TIER_THRESHOLDS: Record<Tier, number> = {
-  newcomer: 0,
-  bronze: 50,
-  silver: 200,
-  gold: 500,
-  platinum: 1000,
-  legend: 2500,
+  newcomer:       0,
+  contributor:   50,
+  helper:       150,
+  expert:       300,
+  champion:     600,
+  knowledge_master: 1000,
 };
 
-export const TIER_ORDER: Tier[] = ['newcomer', 'bronze', 'silver', 'gold', 'platinum', 'legend'];
+export const TIER_ORDER: Tier[] = ['newcomer', 'contributor', 'helper', 'expert', 'champion', 'knowledge_master'];
 
 export function calculateTier(points: number): Tier {
   let tier: Tier = 'newcomer';
@@ -98,10 +113,18 @@ const userSchema = new MongooseSchema<IUser>(
     password: { type: String, required: true, minlength: 6, select: false },
     role: { type: String, enum: ['user', 'moderator', 'admin', 'ai_moderator', 'expert'] as UserRole[], default: 'user' },
 
+    // Profile picture (Cloudinary). Both fields are optional — a user
+    // without one falls back to the initial-based avatar rendered in the
+    // navbar/comment/post cards.
+    avatar: {
+      url: { type: String },
+      publicId: { type: String },
+    },
+
     // Reputation
     reputation: { type: Number, default: 0, min: 0 },
     points: { type: Number, default: 0, min: 0 },
-    tier: { type: String, enum: ['newcomer', 'bronze', 'silver', 'gold', 'platinum', 'legend'] as Tier[], default: 'newcomer' },
+    tier: { type: String, enum: ['newcomer', 'contributor', 'helper', 'expert', 'champion', 'knowledge_master'] as Tier[], default: 'newcomer' },
     positiveBadges: [{
       badgeId: { type: MongooseSchema.Types.ObjectId, ref: 'Badge' },
       awardedAt: { type: Date, default: Date.now },
@@ -135,6 +158,12 @@ const userSchema = new MongooseSchema<IUser>(
     // Admin 2FA / TOTP
     totpEnabled:   { type: Boolean, default: false },
     totpSecret:    { type: String },   // AES-256-GCM encrypted; only stored after 2FA is set up
+
+    // Bookmarked community posts — NOT used for reputation scoring
+    bookmarks: { type: [{ type: MongooseSchema.Types.ObjectId, ref: 'CommunityPost' }], default: [] },
+    // Denormalized counts for leaderboard trust score (updated on write, not computed per-request)
+    acceptedAnswers: { type: Number, default: 0 },
+    faqContributions: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

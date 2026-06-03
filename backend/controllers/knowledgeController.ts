@@ -104,3 +104,19 @@ export const promoteToFAQ = async (req: Request, res: Response): Promise<void> =
     res.status(500).json({ message: (err as Error).message });
   }
 };
+
+// ─── Answer a community post from the knowledge base ─────────────────────────
+
+export const answerFromKnowledgeController = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) { res.status(401).json({ message: 'Not authorized' }); return; }
+  try {
+    const { answerFromKnowledge } = await import('../services/knowledgeBase.js');
+    // Express 5 types req.params values as `string | string[]` — coerce to string.
+    const postId = String(req.params.postId);
+    const result = await answerFromKnowledge(postId);
+    if (!result.answered) { res.status(404).json({ message: 'No matching knowledge found' }); return; }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: (err as Error).message });
+  }
+};

@@ -48,18 +48,6 @@ const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(function Se
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    // If the search query value changes (especially from outside), clear pending debounced searches
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-    if (suggestDebounceRef.current) {
-      clearTimeout(suggestDebounceRef.current);
-      suggestDebounceRef.current = null;
-    }
-  }, [value]);
-
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const handleSearch = async (searchQuery: string) => {

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/auth.js';
 import {
@@ -6,6 +7,7 @@ import {
   callbackZoom,
   disconnectZoom,
   zoomStatus,
+  adminBackfill,
 } from '../controllers/zoomAuthController.js';
 import {
   handleZoomChallenge,
@@ -16,9 +18,16 @@ import {
   updateInsight,
   getZoomHealthStatus,
   getZoomPublicStats,
+  convertInsightToFAQ,
+  uploadTranscript,
+  getMeetingProgress,
 } from '../controllers/zoomController.js';
 
 const router = Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB cap
+});
 
 // ── Public stats (no auth) — used by HomePage to show "X meetings processed" ──
 // MUST be registered before any protect middleware
@@ -33,6 +42,7 @@ router.get('/auth/connect',    protect, authorize('admin'), connectZoom);
 router.get('/auth/callback',   callbackZoom);
 router.delete('/auth/disconnect', protect, authorize('admin'), disconnectZoom);
 router.get('/auth/status',     protect, authorize('admin'), zoomStatus);
+router.post('/auth/backfill',  protect, authorize('admin'), adminBackfill);
 
 // ── Webhook (no auth — Zoom calls this) ───────────────────────────────────────
 router.get('/webhook',  handleZoomChallenge);
@@ -43,8 +53,11 @@ router.use(protect, authorize('admin'));
 
 router.get('/meetings', listMeetings);
 router.get('/meetings/:id', getMeeting);
+router.get('/meetings/:id/progress', getMeetingProgress);
 router.get('/insights', listInsights);
 router.put('/insights/:id', updateInsight);
+router.post('/insights/:id/convert-to-faq', convertInsightToFAQ);
+router.post('/upload-transcript', upload.single('file'), uploadTranscript);
 router.get('/health', getZoomHealthStatus);
 
 export default router;

@@ -6,6 +6,8 @@ import ReputationLog from '../models/ReputationLog.js';
 import { autoAwardBadges } from './reputationController.js';
 import { sanitizeHtml } from '../utils/sanitize.js';
 import { createTeaDrop } from './teaNotificationController.js';
+import { dispatchNotification } from '../utils/notificationDispatcher.js';
+import { logger } from '../utils/logger.js';
 
 // Extend Express Request to include user (same pattern as auth middleware)
 declare global {
@@ -65,6 +67,14 @@ export const addComment = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Post not found.' });
       return;
     }
+    if (post.isLocked) {
+      res.status(403).json({ message: 'This post is locked. New comments are disabled.' });
+      return;
+    }
+    if (post.isHidden) {
+      res.status(403).json({ message: 'This post is hidden.' });
+      return;
+    }
 
     // Resolve parent comment if this is a reply
     let resolvedParent: any = null;
@@ -97,10 +107,9 @@ export const addComment = async (req: Request, res: Response): Promise<void> => 
     const newComment = post.comments[post.comments.length - 1];
 
     // ── First Responder award (atomic) ─────────────────────────────────────────
-    // Only the very first comment on a 'pending' Time-Trial post wins.
-    // We use findOneAndUpdate so this is race-condition-safe — only the earliest
-    // write that lands wins, all others silently get isFirstResponder=false.
-    if (post.timeTrialStatus === 'pending') {
+    // Only the very first top-level comment (depth=0) on a 'pending' Time-Trial
+    // post wins. Replies (depth > 0) are excluded.
+    if (post.timeTrialStatus === 'pending' && (commentObj.depth === 0)) {
       const awardResult = await CommunityPost.findOneAndUpdate(
         {
           _id: post._id,
@@ -198,140 +207,6 @@ export const addComment = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
-// POST /api/community/:id/comments/:commentId/upvote — Toggle upvote on a comment
-export const toggleCommentUpvote = async (req: Request, res: Response): Promise<void> => {
-  if (!req.user) { res.status(401).json({ message: "Not authorized" }); return; }
-  try {
-    const post = await CommunityPost.findById(req.params.id);
-    if (!post) {
-      res.status(404).json({ message: 'Post not found.' });
-      return;
-    }
-
-    const comment = (post.comments as any).id(req.params.commentId);
-    if (!comment) {
-      res.status(404).json({ message: 'Comment not found.' });
-      return;
-    }
-
-    const commentId: string = req.params.commentId as string;
-    const userId = req.user!._id.toString();
-    const alreadyUpvoted = comment.upvotes.map((u: Types.ObjectId) => u.toString()).includes(userId);
-
-    // Tea drop: notify comment author on new upvote (not self-votes, not retractions)
-    const commentAuthorId = comment.author;
-    const isSelfVote = commentAuthorId.toString() === userId;
-    const wasNewUpvote = !alreadyUpvoted;
-
-    // Use atomic $pull/$addToSet to avoid race-condition duplicates
-    await CommunityPost.findOneAndUpdate(
-      { _id: post._id, 'comments._id': new Types.ObjectId(commentId) },
-      alreadyUpvoted
-        ? { $pull: { 'comments.$.upvotes': new Types.ObjectId(userId) } }
-        : {
-            $addToSet: { 'comments.$.upvotes': new Types.ObjectId(userId) },
-            $pull: { 'comments.$.downvotes': new Types.ObjectId(userId) },
-          },
-      { returnDocument: 'after' }
-    );
-
-    // Re-fetch to get accurate counts
-    const updated = await CommunityPost.findById(post._id).select('comments.upvotes comments.downvotes');
-    const refreshed = (updated?.comments as any).id(req.params.commentId);
-
-    if (!isSelfVote && wasNewUpvote) {
-      createTeaDrop({
-        userId: commentAuthorId,
-        eventType: 'comment_received',
-        postId: post._id as Types.ObjectId,
-        postTitle: post.title,
-        triggeredBy: req.user!._id,
-        triggeredByName: req.user!.name,
-      }).catch(() => {});
-      // Award +3 points to comment author for receiving upvote (atomic, race-safe)
-      const updatedCommentAuthor = await User.findByIdAndUpdate(
-        commentAuthorId,
-        { $inc: { points: 3, reputation: 3 } },
-        { new: true }
-      );
-      if (updatedCommentAuthor) {
-        updatedCommentAuthor.tier = calculateTier(updatedCommentAuthor.points);
-        await updatedCommentAuthor.save();
-        autoAwardBadges(commentAuthorId.toString()).catch(() => {});
-        await ReputationLog.create({
-          userId: commentAuthorId,
-          delta: 3,
-          reason: `Comment upvote on post "${post.title.slice(0, 40)}"`,
-          action: 'upvote_received',
-          targetId: post._id as Types.ObjectId,
-          targetType: 'comment',
-        });
-      }
-    }
-
-    res.json({
-      upvotes: refreshed?.upvotes?.length ?? 0,
-      downvotes: refreshed?.downvotes?.length ?? 0,
-      netScore: (refreshed?.upvotes?.length ?? 0) - (refreshed?.downvotes?.length ?? 0),
-      upvotedByMe: !alreadyUpvoted,
-    });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
-  }
-};
-
-// POST /api/community/:id/comments/:commentId/downvote — Toggle downvote on a comment
-export const toggleCommentDownvote = async (req: Request, res: Response): Promise<void> => {
-  if (!req.user) { res.status(401).json({ message: "Not authorized" }); return; }
-  try {
-    const post = await CommunityPost.findById(req.params.id);
-    if (!post) {
-      res.status(404).json({ message: 'Post not found.' });
-      return;
-    }
-
-    const comment = (post.comments as any).id(req.params.commentId);
-    if (!comment) {
-      res.status(404).json({ message: 'Comment not found.' });
-      return;
-    }
-
-    const userId = req.user!._id.toString();
-    const alreadyDownvoted = comment.downvotes.map((u: Types.ObjectId) => u.toString()).includes(userId);
-
-    if (alreadyDownvoted) {
-      comment.downvotes = comment.downvotes.filter((u: Types.ObjectId) => u.toString() !== userId);
-    } else {
-      comment.downvotes.push(req.user!._id);
-      comment.upvotes = comment.upvotes.filter((u: Types.ObjectId) => u.toString() !== userId);
-    }
-
-    const netScore = comment.upvotes.length - comment.downvotes.length;
-
-    if (netScore <= -5) {
-      comment.deleteOne();
-      await post.save();
-      res.json({
-        deleted: true,
-        message: 'Comment obliterated.',
-      });
-      return;
-    }
-
-    await post.save();
-
-    res.json({
-      upvotes: comment.upvotes.length,
-      downvotes: comment.downvotes.length,
-      netScore,
-      downvotedByMe: !alreadyDownvoted,
-      deleted: false,
-    });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
-  }
-};
-
 // PATCH /api/community/:id/comments/:commentId/dna — Set or update solution DNA on a comment
 export const setCommentDNA = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) { res.status(401).json({ message: "Not authorized" }); return; }
@@ -420,5 +295,123 @@ export const verifyComment = async (req: Request, res: Response): Promise<void> 
     res.json({ verified: comment.verified, commentId: req.params.commentId });
   } catch (error) {
     res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
+  }
+};
+
+// PATCH /api/community/:id/comments/:commentId/accept-answer — Accept a comment as the official answer
+// Only the post author can accept an answer; sets answer, answerAuthorId, status=answered, clears escalation
+export const acceptCommentAnswer = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) { res.status(401).json({ message: "Not authorized" }); return; }
+  try {
+    const post = await CommunityPost.findById(req.params.id);
+    if (!post) {
+      res.status(404).json({ message: 'Post not found.' });
+      return;
+    }
+
+    // Only the post author can accept an answer
+    if (post.author.toString() !== req.user!._id.toString()) {
+      res.status(403).json({ message: 'Only the post author can accept an answer.' });
+      return;
+    }
+
+    const commentId = req.params.commentId as string;
+    if (!commentId) {
+      res.status(400).json({ message: 'Comment ID is required.' });
+      return;
+    }
+    const comment = (post.comments as any).id(commentId);
+    if (!comment) {
+      res.status(404).json({ message: 'Comment not found.' });
+      return;
+    }
+
+    // Set the comment body as the official answer
+    post.answer = comment.body;
+    post.answerIsExpert = false;
+    post.answerAuthorId = comment.author;
+    post.status = 'answered';
+    // Track which comment was accepted so FAQ promotion can reference it
+    post.promotionCandidateCommentId = new Types.ObjectId(commentId);
+    // Lifecycle: transition to 'answered' stage (knowledge-lifecycle-design.md)
+    if (post.lifecycle?.status === 'open') {
+      (post.lifecycle.statusHistory ??= []).push({
+        from: 'open',
+        to: 'answered',
+        changedBy: req.user!._id,
+        changedAt: new Date(),
+        note: 'Answer accepted by question author',
+      });
+      post.lifecycle.status = 'answered';
+    }
+    // Clear any pending escalation
+    post.escalationStatus = 'none';
+    post.escalatedAt = null;
+    post.escalationReason = null;
+    post.escalatedBy = null;
+
+    // Mark this comment as verified
+    comment.verified = true;
+
+    await post.save();
+
+    // ── Award +20 to answer author for accepted answer ───────────────────────
+    const answerAuthorId = (comment.author as Types.ObjectId).toString();
+    if (answerAuthorId !== req.user!._id.toString()) {
+      const answerAuthor = await User.findByIdAndUpdate(
+        answerAuthorId,
+        { $inc: { points: 20, reputation: 20, acceptedAnswers: 1 } },
+        { new: true }
+      );
+      if (answerAuthor) {
+        answerAuthor.tier = calculateTier(answerAuthor.points);
+        await answerAuthor.save();
+        autoAwardBadges(answerAuthorId).catch(() => {});
+        await ReputationLog.create({
+          userId: new Types.ObjectId(answerAuthorId),
+          delta: 20,
+          reason: `Answer accepted on post "${post.title.slice(0, 40)}"`,
+          action: 'answer_accepted',
+          targetId: post._id as Types.ObjectId,
+          targetType: 'comment',
+        });
+      }
+    }
+
+    // ── Check if post is now eligible for FAQ promotion ───────────────────────
+    const { checkPromotionEligibility, startPromotionReview } = await import('../services/promotionService.js');
+    try {
+      const eligible = await checkPromotionEligibility(post);
+      if (eligible) {
+        await startPromotionReview(post, req.user!._id.toString());
+        logger.info(`Accepted answer on post ${post._id} entered promotion review`, { postId: post._id.toString() });
+      }
+    } catch (e) {
+      logger.warn(`Promotion eligibility check failed for post ${post._id}: ${(e as Error).message}`);
+    }
+
+    // ── Notify the comment author ────────────────────────────────────────────
+    if (comment.author.toString() !== req.user!._id.toString()) {
+      dispatchNotification({
+        recipientId: comment.author as Types.ObjectId,
+        eventType: 'accepted_answer',
+        link: `/community?post=${post._id}`,
+        title: 'Your answer was accepted!',
+      }).catch(() => {});
+
+      createTeaDrop({
+        userId: comment.author,
+        eventType: 'post_answered',
+        postId: post._id as Types.ObjectId,
+        postTitle: post.title,
+        triggeredBy: req.user!._id,
+        triggeredByName: req.user!.name,
+        content: comment.body.slice(0, 200),
+      }).catch(() => {});
+    }
+
+    res.json({ message: 'Answer accepted.', post });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: (error as Error).message });
   }
 };

@@ -1,16 +1,17 @@
 import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { AuthModalProvider } from './context/AuthModalContext';
+import AuthModal from './components/auth/AuthModal';
 import Spinner from './components/ui/Spinner';
 
 // User pages
-const LoginPage = lazy(() => import('./pages/LoginPage'));
-const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const AccountPage = lazy(() => import('./pages/AccountPage'));
 const HomePage = lazy(() => import('./pages/HomePage'));
 const FAQPage = lazy(() => import('./pages/FAQPage'));
 const CommunityPage = lazy(() => import('./pages/CommunityPage'));
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage'));
+const SavedKnowledgePage = lazy(() => import('./pages/SavedKnowledgePage'));
 
 // Admin pages
 const AdminLogin = lazy(() => import('./admin/pages/AdminLogin'));
@@ -28,15 +29,15 @@ const AdminAISettings = lazy(() => import('./admin/pages/AdminAISettings'));
 const FaqReview = lazy(() => import('./admin/pages/FaqReview'));
 const AdminLayout = lazy(() => import('./admin/components/layout/AdminLayout'));
 
-interface ProtectedRouteProps {
+interface AccountRouteProps {
   children: React.ReactNode;
 }
 
-// Helper component to lock down specific routes
-function ProtectedRoute({ children }: ProtectedRouteProps) {
+// Account/settings is the only member-only page now — it's a logged-in
+// user's own profile. Anonymous visitors get bounced to home (where the
+// auth modal is mounted and they can sign in).
+function AccountRoute({ children }: AccountRouteProps) {
   const { isAuthenticated, loading } = useAuth();
-
-  // Show a minimal loading spinner while the app verifies the token in the background
   if (loading) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">
@@ -44,9 +45,7 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
       </div>
     );
   }
-
-  // If authenticated, render the requested page; otherwise, kick them back to login
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  return isAuthenticated ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 interface AdminRouteProps {
@@ -69,9 +68,11 @@ function AdminRoute({ children }: AdminRouteProps) {
     : <Navigate to="/" replace />;
 }
 
-// Component defining all available URLs in the app
+// Component defining all available URLs in the app.
+// All "content" routes (home, faq, community, leaderboard) are now public —
+// read access is universal, write actions open the auth modal in place.
 function AppRoutes() {
-  const { isAuthenticated, loading } = useAuth();
+  const { loading } = useAuth();
 
   // Prevent route flashing by waiting for the initial auth check to finish
   if (loading) {
@@ -84,23 +85,23 @@ function AppRoutes() {
 
   return (
     <Routes>
-      {/* Public Routes: Redirect to home if the user is already logged in */}
-      <Route
-        path="/login"
-        element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />}
-      />
-      <Route
-        path="/register"
-        element={isAuthenticated ? <Navigate to="/" replace /> : <RegisterPage />}
-      />
+      {/* Public content routes — anonymous users can browse freely */}
+      <Route path="/" element={<HomePage />} />
+      <Route path="/faq" element={<FAQPage />} />
+      <Route path="/faq/:id" element={<FAQPage />} />
+      <Route path="/community" element={<CommunityPage />} />
+      <Route path="/leaderboard" element={<LeaderboardPage />} />
+      <Route path="/saved" element={<SavedKnowledgePage />} />
 
-      {/* Private Routes: Wrapped in ProtectedRoute to enforce authentication */}
-      <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-      <Route path="/faq" element={<ProtectedRoute><FAQPage /></ProtectedRoute>} />
-      <Route path="/faq/:id" element={<ProtectedRoute><FAQPage /></ProtectedRoute>} />
-      <Route path="/community" element={<ProtectedRoute><CommunityPage /></ProtectedRoute>} />
-      <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
-      <Route path="/leaderboard" element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>} />
+      {/* Member-only: a user's own settings */}
+      <Route
+        path="/account"
+        element={
+          <AccountRoute>
+            <AccountPage />
+          </AccountRoute>
+        }
+      />
 
       {/* Admin Panel dedicated routes (guarded by AdminRoute) */}
       <Route path="/admin/login" element={<AdminLogin />} />
@@ -117,23 +118,34 @@ function AppRoutes() {
       <Route path="/admin/settings/ai" element={<AdminRoute><AdminLayout><AdminAISettings /></AdminLayout></AdminRoute>} />
       <Route path="/admin/faqs/review" element={<AdminRoute><AdminLayout><FaqReview /></AdminLayout></AdminRoute>} />
 
-      {/* Catch-all fallback: Redirect any unknown URLs to the home page */}
+      {/* Catch-all fallback: redirect any unknown URL to home */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+  );
+}
+
+// Inner wrapper that subscribes to isAuthenticated so the AuthModalProvider
+// can detect the false→true flip and replay any pending gated action.
+function AuthModalHost({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  return (
+    <AuthModalProvider isAuthenticated={isAuthenticated}>
+      {children}
+      <AuthModal />
+    </AuthModalProvider>
   );
 }
 
 // The absolute root of the React tree
 export default function App() {
   return (
-    // 1. BrowserRouter enables URL navigation
     <BrowserRouter>
-      {/* 2. AuthProvider injects global user state into all child components */}
       <AuthProvider>
-        <Suspense fallback={<div className="min-h-screen bg-bg flex items-center justify-center"><Spinner size="md" /></div>}>
-          {/* 4. AppRoutes actually renders the correct page based on the URL */}
-          <AppRoutes />
-        </Suspense>
+        <AuthModalHost>
+          <Suspense fallback={<div className="min-h-screen bg-bg flex items-center justify-center"><Spinner size="md" /></div>}>
+            <AppRoutes />
+          </Suspense>
+        </AuthModalHost>
       </AuthProvider>
     </BrowserRouter>
   );

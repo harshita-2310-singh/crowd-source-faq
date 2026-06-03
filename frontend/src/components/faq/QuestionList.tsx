@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
-import { FAQItem, getQuestionTitle, getAnswerText, formatDate, formatCategoryName, TrustBadge } from './faqUtils';
+import React, { useMemo, useRef, useEffect, useCallback } from 'react';
+import { FAQItem, getQuestionTitle, getAnswerText, formatDate, formatCategoryName, TrustBadge, SourceBadge } from './faqUtils';
+import FreshnessBadge from '../ui/FreshnessBadge';
 
 interface QuestionItemProps {
   item: FAQItem;
@@ -11,6 +12,8 @@ export function QuestionItem({ item, onSelect }: QuestionItemProps) {
   const answer = getAnswerText(item);
   const metaDate = formatDate(item?.updatedAt || item?.createdAt);
   const sourceLabel = item?.source ? (item.source === 'faq' ? 'FAQ' : 'Community') : '';
+  // Freshness badge only renders for FAQ-sourced rows (community posts don't have review state)
+  const showFreshness = item?.source === 'faq';
 
   return (
     <button
@@ -22,6 +25,7 @@ export function QuestionItem({ item, onSelect }: QuestionItemProps) {
           <p className="text-sm font-medium text-ink leading-snug line-clamp-2">
             {title}
             <TrustBadge level={item.trustLevel} />
+            <SourceBadge sourceType={item.sourceType} />
           </p>
           {answer && (
             <p className="mt-1 text-xs text-ink-soft leading-relaxed line-clamp-2">
@@ -36,6 +40,15 @@ export function QuestionItem({ item, onSelect }: QuestionItemProps) {
             )}
             {item?.category && <span>{formatCategoryName(item.category)}</span>}
             {metaDate && <span>{metaDate}</span>}
+            {showFreshness && (
+              <FreshnessBadge
+                reviewStatus={item.reviewStatus}
+                lastVerifiedDate={item.lastVerifiedDate}
+                reviewIntervalDays={item.reviewIntervalDays ?? 0}
+                freshnessTier={item.freshnessTier}
+                compact
+              />
+            )}
           </div>
         </div>
       </div>
@@ -77,6 +90,25 @@ export default function QuestionList({
   }, [items, sortOption]);
 
   const visibleItems = sortedItems.slice(0, visibleCount);
+  const hasMore = visibleCount < sortedItems.length;
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+
+  const handleIntersect = useCallback(
+    (entries: IntersectionObserverEntry[]) => {
+      if (entries[0].isIntersecting && hasMore && !loading) {
+        onLoadMore();
+      }
+    },
+    [hasMore, loading, onLoadMore]
+  );
+
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(handleIntersect, { rootMargin: '200px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [handleIntersect]);
 
   return (
     <div className="bg-card rounded-2xl border border-border shadow-subtle overflow-hidden">
@@ -119,18 +151,9 @@ export default function QuestionList({
             {emptyMessage}
           </div>
         )}
-      </div>
 
-      {!loading && visibleCount < sortedItems.length && (
-        <div className="px-5 py-4 border-t border-border/60">
-          <button
-            onClick={onLoadMore}
-            className="w-full rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold text-ink hover:bg-cream transition-colors"
-          >
-            Load more questions
-          </button>
-        </div>
-      )}
+        {hasMore && <div ref={loadMoreRef} className="h-px" />}
+      </div>
     </div>
   );
 }

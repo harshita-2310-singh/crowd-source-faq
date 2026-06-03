@@ -29,7 +29,7 @@ const searchLogSchema = new MongooseSchema(
     },
     topResultSource: {
       type: String,
-      enum: ['faq', 'community', null] as ResultSource[], // Identifies whether the best answer came from official FAQs or user posts
+      enum: ['faq', 'community', 'knowledge', null] as ResultSource[], // Identifies whether the best answer came from official FAQs, user posts, or the auto-extracted knowledge base
       default: null,
     },
   },
