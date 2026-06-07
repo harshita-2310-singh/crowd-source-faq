@@ -29,7 +29,6 @@ export function CategoryCard({ name, items, onOpen }: CategoryCardProps) {
   // Subtle tinted background — near-white in light, green-dark in dark
   const cardStyle: React.CSSProperties = isDark
     ? {
-        backgroundColor: '#081512',
         backgroundImage: theme.gradientDark,
       }
     : {

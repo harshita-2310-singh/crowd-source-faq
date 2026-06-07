@@ -1045,19 +1045,22 @@ select option {
     opacity: 0.9;
   }
 
-  /* ── Dark mode overrides — deep green environment ── */
+  /* ── Dark mode overrides — glassmorphism ── */
   [data-theme="dark"] .faq-card-clay {
-    background-color: #081512;
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    box-shadow: 0 10px 35px rgba(0, 0, 0, 0.7);
+    background: rgba(255, 255, 255, 0.055);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   }
   [data-theme="dark"] .faq-card-clay::before {
-    background: radial-gradient(circle at top right, rgba(255,255,255,0.035), transparent 65%);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 40%);
   }
   [data-theme="dark"] .faq-card-clay:hover {
-    border-color: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 16px 45px rgba(0, 0, 0, 0.75),
-                inset 0 0 30px rgba(16, 185, 129, 0.04);
+    background: rgba(255, 255, 255, 0.075);
+    border-color: rgba(34, 197, 94, 0.35);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45),
+                0 0 1px rgba(34, 197, 94, 0.15);
   }
 
   /* SVG — environment-blended, consistent size */

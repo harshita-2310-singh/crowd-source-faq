@@ -11,24 +11,24 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<ButtonVariant, React.CSSProperties> = {
-  primary: { backgroundColor: '#5a7a5a' },
+  primary: {},
   secondary: {},
   ghost: {},
-  accent: { backgroundColor: 'rgba(90, 122, 90, 0.1)', color: '#5a7a5a' },
-  danger: { backgroundColor: '#dc2626' },
+  accent: {},
+  danger: {},
 };
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    'text-accent-text hover:brightness-90 active:brightness-75 shadow-sm',
+    'btn-primary shadow-sm',
   secondary:
-    'bg-card text-ink border border-border hover:bg-mist hover:border-ink-soft active:bg-border',
+    'btn-secondary',
   ghost:
-    'bg-transparent text-ink-soft hover:bg-mist hover:text-ink active:bg-border/40',
+    'btn-ghost',
   accent:
-    'hover:bg-accent/15 active:bg-accent/20',
+    'bg-accent/10 text-accent hover:bg-accent/15 active:bg-accent/20',
   danger:
-    'text-accent-text hover:brightness-90 active:brightness-75 shadow-sm',
+    'bg-danger text-white hover:brightness-90 active:brightness-75 shadow-sm',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {

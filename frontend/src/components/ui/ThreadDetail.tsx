@@ -313,14 +313,18 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-6 bg-ink/60 backdrop-blur-xl overflow-y-auto"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
+    <>
+      {/* Background overlay that matches the search-overlay / chat-overlay premium blur */}
+      <div className="search-overlay !z-40" aria-hidden="true" onClick={onClose} />
+      
+      {/* Scrollable container for the modal itself */}
       <div
-        className="relative w-full max-w-2xl bg-card rounded-2xl border border-border shadow-float my-4 animate-slide-up overflow-hidden flex flex-col"
-        style={{ maxHeight: 'calc(100vh - 2rem)' }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto pointer-events-none"
       >
+        <div
+          className="relative w-full max-w-3xl bg-card rounded-2xl border border-border shadow-float animate-fade-in overflow-hidden flex flex-col pointer-events-auto"
+          style={{ maxHeight: 'calc(100vh - 3rem)' }}
+        >
         {/* Action error banner */}
         {actionError && (
           <div className="mx-5 mt-4 px-4 py-2.5 bg-danger-light border border-danger/20 rounded-xl text-xs text-danger flex items-center justify-between gap-2">
@@ -329,20 +333,20 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
           </div>
         )}
         {/* ── Sticky modal header ── */}
-        <div className="flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-md">
-          <div className="flex items-center justify-between px-5 py-3">
+        <div className="flex-shrink-0 border-b border-border bg-card">
+          <div className="flex items-center justify-between px-6 sm:px-8 py-4">
             {/* Left: close + status */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <button
                 onClick={onClose}
-                className="w-8 h-8 rounded-lg bg-mist hover:bg-border flex items-center justify-center text-ink-soft hover:text-ink transition-all"
+                className="w-8 h-8 rounded-xl bg-mist hover:bg-border flex items-center justify-center text-ink-soft hover:text-ink transition-all"
                 title="Close"
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path d="M9 2L4 7L9 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </button>
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${
                 isAnswered
                   ? 'bg-success-light text-success border-success/20'
                   : 'bg-warning-light text-warning border-warning/20'
@@ -361,67 +365,64 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
               )}
             </div>
 
-            {/* Right: stats + actions */}
-            <div className="flex items-center gap-2">
-              {/* Upvotes */}
-              <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg border transition-colors cursor-pointer ${hasUpvoted ? 'bg-accent/10 text-accent border-accent/20' : 'bg-mist text-ink-soft border-border hover:border-accent/30 hover:text-ink'}`} onClick={handleUpvote}>
+            {/* Right: essential actions */}
+            <div className="flex items-center gap-1.5">
+              {/* Upvote pill */}
+              <button
+                onClick={handleUpvote}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl border transition-all ${
+                  hasUpvoted
+                    ? 'bg-accent/10 text-accent border-accent/20'
+                    : 'bg-mist text-ink-soft border-border hover:border-accent/30 hover:text-ink'
+                }`}
+              >
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M6 10V2M6 2L2 6M6 2L10 6"/>
                 </svg>
                 {upvoteCount}
-              </span>
-
-              {/* Downvotes */}
-              <span className="flex items-center gap-1 text-xs text-ink-faint px-2 py-1">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M6 2v8M6 10L2 6M6 10L10 6"/>
-                </svg>
-                {post.downvotes?.length ?? 0}
-              </span>
+              </button>
 
               {/* Comment count */}
-              <span className="flex items-center gap-1 text-xs text-ink-faint px-2 py-1">
+              <span className="flex items-center gap-1.5 text-xs text-ink-faint px-2.5 py-1.5">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M2 2h8v6H7L5 10H2V2z"/>
                 </svg>
                 {post.comments?.length ?? 0}
               </span>
 
-              <div className="w-px h-4 bg-border mx-0.5" />
-
               {/* Bookmark */}
               <button
                 onClick={handleBookmark}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
                   post.bookmarks?.some(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() === currentUserId)
                     ? 'bg-accent/10 text-accent'
                     : 'bg-mist text-ink-soft hover:bg-border hover:text-ink'
                 }`}
                 title="Bookmark"
               >
-                <svg width="13" height="13" viewBox="0 0 13 13" fill={post.bookmarks?.some(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() === currentUserId) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.4">
-                  <path d="M3 2h7v9l-3.5-2-3.5 2V2z"/>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill={post.bookmarks?.some(b => (typeof b === 'object' ? (b as { _id?: string })._id : b)?.toString() === currentUserId) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.4">
+                  <path d="M3.5 2h7v10l-3.5-2.5-3.5 2.5V2z"/>
                 </svg>
               </button>
 
               {/* Share */}
               <button
                 onClick={() => { navigator.clipboard.writeText(window.location.href); setActionError('Link copied!'); setTimeout(() => setActionError(null), 2000); }}
-                className="w-8 h-8 rounded-lg bg-mist text-ink-soft hover:bg-border hover:text-ink flex items-center justify-center transition-all"
+                className="w-8 h-8 rounded-xl bg-mist text-ink-soft hover:bg-border hover:text-ink flex items-center justify-center transition-all"
                 title="Copy link"
               >
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.4">
-                  <path d="M5 3H3a1 1 0 00-1 1v6a1 1 0 001 1h6a1 1 0 001-1V8M8 1h4v4M5 8l4-4"/>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+                  <path d="M5.5 3.5H3.5a1 1 0 00-1 1v6a1 1 0 001 1h6a1 1 0 001-1v-2M8.5 1.5h4v4M6 8l4.5-4.5"/>
                 </svg>
               </button>
 
               {/* Author / privileged actions */}
               {(currentUserId === post.author?._id || isPrivileged) && (
                 <>
-                  <div className="w-px h-4 bg-border mx-0.5" />
+                  <div className="w-px h-5 bg-border mx-1" />
                   <button
                     onClick={() => { setShowResolveForm(true); }}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent/10 text-accent hover:bg-accent/20 text-xs font-semibold border border-accent/20 transition-all"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent/10 text-accent hover:bg-accent/20 text-xs font-semibold border border-accent/20 transition-all"
                   >
                     <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.4">
                       <path d="M8.5 1.5L10 3L4 9H2V7L8.5 1.5Z" strokeLinejoin="round"/>
@@ -444,7 +445,7 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
                       setTimeout(() => setActionError(null), 3000);
                     }
                   }}
-                  className="w-8 h-8 rounded-lg bg-mist text-ink-soft hover:bg-red-50 hover:text-red-500 flex items-center justify-center transition-all"
+                  className="w-8 h-8 rounded-xl bg-mist text-ink-soft hover:bg-red-50 hover:text-red-500 flex items-center justify-center transition-all"
                   title="Delete post"
                 >
                   <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.4">
@@ -459,13 +460,13 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
         {/* ── Scrollable body ── */}
                 <div className="overflow-y-auto flex-1">
                   {/* Post hero */}
-                  <div className="px-6 py-5">
-                    <div className="flex items-start gap-3 mb-3">
+                  <div className="px-6 sm:px-8 py-6">
+                    <div className="flex items-start gap-3.5 mb-4">
                       <Avatar name={post.author?.name} size="md" className="mt-0.5" />
                       <div className="flex-1 min-w-0">
-                        <h1 className="text-[15px] sm:text-base font-semibold text-ink leading-snug">{post.title}</h1>
-                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                          <span className="text-xs font-medium text-ink-soft">{post.author?.name || 'Student'}</span>
+                        <h1 className="text-base sm:text-lg font-semibold text-ink leading-snug">{post.title}</h1>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <span className="text-sm font-medium text-ink-soft">{post.author?.name || 'Student'}</span>
                           <span className="text-xs text-ink-faint">·</span>
                           <span className="text-xs text-ink-faint">{formatDate(post.createdAt)}</span>
                           {isPrivileged && post.timeTrialStatus === 'pending' && (
@@ -483,7 +484,7 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
                     </div>
 
                     {/* Body */}
-                    <p className="text-sm text-ink/75 leading-relaxed">{post.body}</p>
+                    <p className="text-sm text-ink/80 leading-relaxed mt-1">{post.body}</p>
 
                     {/* Attachment thumbnails */}
                     {(() => {
@@ -556,9 +557,9 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
                     </div>
                   </div>
 
-          {/* Official answer */}
+          {/* Official answer — visual separator */}
           {isAnswered && post.answer && (
-            <div className="mx-5 mb-4 bg-success-light/30 border border-success/20 rounded-xl p-4">
+            <div className="mx-6 sm:mx-8 mb-5 bg-success-light/30 border border-success/20 rounded-xl p-5">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-xs font-semibold text-success uppercase tracking-wider">✓ Official Answer</span>
                 {post.answerIsExpert && <Badge variant="success">👑 Expert</Badge>}
@@ -604,14 +605,14 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
 
           {/* Resolve form */}
           {canResolve && !isAnswered && !showResolveForm && (
-            <div className="px-5 pb-4">
+            <div className="px-6 sm:px-8 pb-5">
               <button onClick={() => setShowResolveForm(true)} className="text-xs text-accent hover:text-accent/70 transition-colors">
                 ✏️ Write an answer
               </button>
             </div>
           )}
           {showResolveForm && (
-            <form onSubmit={handleResolve} className="px-5 pb-4 space-y-2">
+            <form onSubmit={handleResolve} className="px-6 sm:px-8 pb-5 space-y-3">
               <label className="text-xs font-medium text-ink-soft">Official Answer</label>
               <textarea value={resolveText} onChange={(e) => setResolveText(e.target.value)} rows={3}
                 placeholder="Write an official answer…"
@@ -625,7 +626,7 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
 
           {/* Lifecycle Activity Timeline */}
           {post.lifecycle?.statusHistory && post.lifecycle.statusHistory.length > 0 && (
-            <div className="px-5 py-4 border-t border-border/30">
+            <div className="px-6 sm:px-8 py-5 border-t border-border/30">
               <h3 className="text-xs font-semibold text-ink-soft uppercase tracking-wider mb-3 flex items-center gap-2">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
                   <circle cx="6" cy="6" r="5"/>
@@ -672,7 +673,7 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
 
           {/* Related Questions + Similar FAQs (per spec) */}
           {(related.relatedQuestions.length > 0 || related.similarFaqs.length > 0) && (
-            <div className="px-5 py-4 border-t border-border/30 grid sm:grid-cols-2 gap-4">
+            <div className="px-6 sm:px-8 py-5 border-t border-border/30 grid sm:grid-cols-2 gap-5">
               {related.relatedQuestions.length > 0 && (
                 <div>
                   <h3 className="text-xs font-semibold text-ink-soft uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
@@ -728,12 +729,23 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
           )}
 
           {/* Comments — Reddit-style threaded */}
-          <div className="px-5 py-4 border-t border-border/30">
-            <h3 className="text-xs font-semibold text-ink-soft uppercase tracking-wider mb-3">
+          <div className="px-6 sm:px-8 py-6 border-t border-border/40">
+            <h3 className="text-sm font-semibold text-ink uppercase tracking-wide mb-4 flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-ink-faint">
+                <path d="M1 3C1 2.17 1.67 1.5 2.5 1.5h9C12.33 1.5 13 2.17 13 3v6C13 9.83 12.33 10.5 11.5 10.5H8.5L5.5 13V10.5H2.5C1.67 10.5 1 9.83 1 9V3z" strokeLinejoin="round"/>
+              </svg>
               Discussion ({topLevelComments.length})
             </h3>
             {topLevelComments.length === 0 ? (
-              <p className="text-sm text-ink-faint text-center py-6">No comments yet. Be the first to comment!</p>
+              <div className="text-center py-10">
+                <div className="w-12 h-12 rounded-2xl bg-mist flex items-center justify-center mx-auto mb-3">
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-ink-faint">
+                    <path d="M2 4c0-1.1.9-2 2-2h12a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4v-4H4a2 2 0 01-2-2V4z" strokeLinejoin="round"/>
+                    <path d="M7 8h6M7 11h4" strokeLinecap="round"/>
+                  </svg>
+                </div>
+                <p className="text-sm text-ink-faint">No comments yet. Be the first to comment!</p>
+              </div>
             ) : (
               <div className="space-y-2">
                 {topLevelComments.map((comment: Comment) => (
@@ -755,25 +767,38 @@ export default function ThreadDetail({ postId, onClose }: ThreadDetailProps) {
                         </div>
 
                         {/* Sticky footer — new comment */}
-                        <form onSubmit={handleCommentSubmit} className="px-4 pt-3 pb-5 border-t border-border bg-card flex-shrink-0">
-                          <div className="flex gap-2 items-start">
-                            <Avatar name={user?.name} size="sm" />
-                            <textarea
-                              value={commentText}
-                              onChange={(e) => setCommentText(e.target.value)}
-                              rows={2}
-                              placeholder="Add a comment…"
-                              className="flex-1 rounded-xl border border-border bg-mist px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-2 focus:ring-accent/25 resize-none"
-                            />
-                            <Button type="submit" size="sm" disabled={!commentText.trim() || commentLoading} loading={commentLoading} className="flex-shrink-0 mt-0.5">
-                              Post
-                            </Button>
+                        <form onSubmit={handleCommentSubmit} className="px-6 sm:px-8 pt-4 pb-6 border-t border-border bg-card flex-shrink-0">
+                          <div className="flex gap-3 items-start">
+                            <Avatar name={user?.name} size="sm" className="mt-1" />
+                            <div className="flex-1 min-w-0">
+                              <textarea
+                                value={commentText}
+                                onChange={(e) => setCommentText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    if (commentText.trim() && !commentLoading) {
+                                      handleCommentSubmit(e as unknown as React.FormEvent);
+                                    }
+                                  }
+                                }}
+                                rows={2}
+                                placeholder="Add a comment…"
+                                className="w-full rounded-xl border border-border bg-mist px-4 py-3 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-2 focus:ring-accent/25 focus:bg-card resize-none transition-all"
+                              />
+                              <div className="flex items-center justify-end mt-2">
+                                <Button type="submit" size="md" disabled={!commentText.trim() || commentLoading} loading={commentLoading}>
+                                  Post
+                                </Button>
+                              </div>
+                            </div>
                           </div>
                           {actionError && (
-                            <p className="text-danger text-xs mt-1.5 pl-1">{actionError}</p>
+                            <p className="text-danger text-xs mt-2 pl-10">{actionError}</p>
                           )}
                         </form>
       </div>
     </div>
+    </>
   );
 };
