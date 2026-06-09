@@ -3,105 +3,7 @@
 Full-stack FAQ portal with semantic vector search, AI-powered community moderation, and an expert promotion layer. Built to handle 1 million registered users.
 
 GitHub: https://github.com/vicharanashala/cs15
-Refer More Here -> [`docs/`](docs/README.md)
-
----
-
-## About
-
-Shamagama (internally "Yaksha FAQ Portal") is a knowledge-management platform that turns an organisation's accumulated conversations into a searchable, self-maintaining FAQ. It combines a hybrid vector + keyword search engine with a community Q&A board and a fully automated ingestion pipeline that pulls transcripts from Zoom meetings, extracts questions and answers with AI, and indexes them for retrieval in seconds.
-
-What makes it different from a traditional forum or wiki:
-
-- **Knowledge comes from where work happens.** Zoom recordings, webhooks, and manual uploads feed the knowledge base automatically. There is no separate "content team" workflow to keep up with.
-- **The community board is not a social media feed.** Its purpose is to surface unanswered questions, get them answered, and promote the best answers back into the official FAQ. Every feature ladders up to that loop.
-- **Automation, not moderation, scales the operation.** AI auto-answers, audits FAQ quality on a 6-hour cycle, retries failed Zoom ingestion with exponential backoff, and anonymises deleted users. Humans handle exceptions; the platform handles the steady state.
-- **Per-user Zoom OAuth.** Each user connects their own Zoom account. There is no org-level admin token to provision, and the platform never sees what it does not need to see.
-
-The platform is built for organisations whose community generates more questions than a human team can answer — student cohorts, open-source projects, internal employee forums, customer-success communities. Target scale: 1 million registered users with constant conversational input.
-
-For the architecture deep-dive, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). For pipeline internals (auto-answer, FAQ audit, search, Zoom), see [docs/PIPELINES.md](docs/PIPELINES.md).
-
----
-
-## Tech Stack
-
-### Frontend
-- React 18, React Router 6
-- Vite, TypeScript, Tailwind CSS (with PostCSS + Autoprefixer)
-- Framer Motion (animations)
-- Axios (HTTP client)
-- Recharts (admin dashboard charts)
-- React Testing Library, jsdom, Vitest
-
-### Backend
-- Node.js, Express 4
-- TypeScript (ES modules), tsx (dev runner), nodemon
-- Mongoose 8 (MongoDB ODM)
-- JWT (jsonwebtoken), bcryptjs
-- Helmet (security headers), CORS, Morgan (request logging), Multer (file uploads)
-- Zod (runtime validation)
-- express-rate-limit (rate limiting)
-- dotenv (env loading)
-- OpenAI SDK (direct client for non-pipeline calls)
-- Vitest (testing)
-
-### Database & Storage
-- MongoDB Atlas (with Vector Search for semantic search)
-- Upstash Redis (caching, optional)
-- LRU cache (in-memory fallback)
-- Cloudinary (file / image storage)
-
-### Search & AI
-- Xenova/transformers (`multi-qa-mpnet-base-dot-v1`, 768-dim, local)
-- MongoDB Atlas Vector Search (cosine similarity)
-- MongoDB $text search (keyword)
-- Reciprocal Rank Fusion (hybrid merge)
-
-### AI Providers (per-pipeline configurable)
-- Anthropic (Claude)
-- OpenAI (GPT)
-- XAI (Grok)
-- MiniMax
-
-### DevOps & Tooling
-- Sentry (error tracking, `@sentry/node`)
-- Ngrok (webhook tunnel for local Zoom dev)
-- Twilio (SMS notifications)
-- SMTP (email notifications)
-- Vitest (unit + integration tests)
-
----
-
-## Quick Start
-
-```bash
-./run.sh        # Full-stack runner: env setup, ngrok tunnel, backend + frontend
-# OR
-cd backend && npm run dev    # tsx server.ts on :6767
-cd frontend && npm run dev   # Vite on :5173
-cd backend && npm run seed   # 130 FAQs + users
-```
-
-`run.sh` prompts for `MONGODB_URI` and `JWT_SECRET` on first run, then starts the full stack with session logs in `logs/`.
-
----
-
-## Documentation
-
-Full reference in [`docs/`](docs/README.md):
-
-| Topic | File |
-|---|---|
-| Architecture overview | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Pipelines (auto-answer, FAQ audit, search, Zoom) | [docs/PIPELINES.md](docs/PIPELINES.md) |
-| MCP integration | [docs/MCP.md](docs/MCP.md) |
-| AI provider configuration | [docs/AI_PROVIDERS.md](docs/AI_PROVIDERS.md) |
-| Project context | [docs/context.md](docs/context.md) |
-| Issues tracking | [docs/issues.md](docs/issues.md) |
-| Wire protocol | [docs/wire.md](docs/wire.md) |
-
-[Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [License](./LICENSE)
+Full reference: [`docs/`](docs/README.md) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [License](./LICENSE)
 
 ---
 
@@ -109,18 +11,51 @@ Full reference in [`docs/`](docs/README.md):
 
 **Automate the FAQ lifecycle end-to-end. Zero people in the loop. Reduce the operational FAQ culture.**
 
-This platform is built on a single conviction: knowledge work should not depend on someone being awake, online, or willing to answer. Every question a user has has been asked before — and most will be asked again. The right answer, in the right form, should be there before the user finishes typing.
+Every question a user has has been asked before — and most will be asked again. The right answer should be there before the user finishes typing. The platform achieves this through four zero-touch pillars:
 
-We pursue this through ruthless automation:
+- **Zero-touch ingestion** — Zoom meetings, webhooks, and manual uploads feed the knowledge base without human scheduling, categorising, or approval.
+- **Zero-touch answering** — A 24-hour scheduler matches unanswered posts against the knowledge base; high-confidence matches auto-post, low-confidence escalate to humans.
+- **Zero-touch quality control** — Approved FAQs are re-evaluated every 6 hours; drift, contradictions, and staleness are detected and flagged automatically.
+- **Zero-touch user lifecycle** — Deletion is anonymisation, not destruction. Reputation, attribution, and audit history persist.
 
-- **Zero-touch ingestion** — Zoom meetings, webhooks, and manual uploads flow into a knowledge base without a human scheduling, categorizing, or approving them. The platform extracts questions, generates embeddings, and makes them searchable in seconds.
-- **Zero-touch answering** — Unanswered community posts are matched against the knowledge base on a 24-hour cycle. High-confidence matches auto-post. Low-confidence matches escalate to humans only when there is no better option.
-- **Zero-touch quality control** — Approved FAQs are re-evaluated every 6 hours against new knowledge. Drift, contradictions, and staleness are detected and flagged automatically. The peer-vote freshness system catches what AI misses.
-- **Zero-touch user lifecycle** — Deletion is anonymization, not destruction. Reputation, attribution, and audit history persist automatically.
+The platform is the operator. People handle exceptions, not the steady state.
 
-The result: an organization can scale to 1 million users with a fraction of the moderator and content-team headcount that a traditional forum would require. The platform is the operator. People handle exceptions, not the steady state.
+---
 
-This is not about replacing humans. It is about freeing them from the endless cycle of "someone asked this in 2022 and we wrote a Slack answer" — the cultural tax of operating a FAQ by hand.
+## About
+
+Shamagama (internally "Yaksha FAQ Portal") turns an organisation's accumulated conversations into a searchable, self-maintaining FAQ. It combines hybrid vector + keyword search with a community Q&A board and a fully automated ingestion pipeline that pulls transcripts from Zoom, extracts Q&A with AI, and indexes them for retrieval in seconds.
+
+Built for organisations whose community generates more questions than a human team can answer — student cohorts, open-source projects, internal forums, customer-success communities. Target scale: 1 million registered users with constant conversational input.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the architecture deep-dive and [docs/PIPELINES.md](docs/PIPELINES.md) for pipeline internals.
+
+---
+
+## Tech Stack
+
+| Layer | Technologies |
+|---|---|
+| Frontend | React 18, Vite, TypeScript, Tailwind CSS, Framer Motion, Axios, Recharts, React Router 6, Vitest |
+| Backend | Node.js, Express 4, TypeScript (ESM), Mongoose 8, JWT, bcryptjs, Helmet, CORS, Morgan, Multer, Zod, express-rate-limit, dotenv, OpenAI SDK, Vitest |
+| Database & Storage | MongoDB Atlas (with Vector Search), Upstash Redis (optional), LRU cache, Cloudinary |
+| Search & AI | Xenova/transformers (768-dim local embeddings), Atlas Vector Search, $text search, Reciprocal Rank Fusion |
+| AI Providers | Anthropic, OpenAI, XAI, MiniMax (per-pipeline configurable) |
+| DevOps | Sentry, Ngrok (local webhook tunnel), Twilio (SMS), SMTP, Vitest |
+
+---
+
+## Quick Start
+
+```bash
+./run.sh        # Full-stack runner: env setup, ngrok, backend + frontend
+# OR
+cd backend && npm run dev    # tsx server.ts on :6767
+cd frontend && npm run dev   # Vite on :5173
+cd backend && npm run seed   # 130 FAQs + users
+```
+
+`run.sh` prompts for `MONGODB_URI` and `JWT_SECRET` on first run, then saves them to `backend/.env.local`. The script will not overwrite existing values. Session logs are written to `logs/session_*.txt`.
 
 ---
 
@@ -129,121 +64,41 @@ This is not about replacing humans. It is about freeing them from the endless cy
 Four flagship capabilities define this platform:
 
 - **Zoom transcript ingestion with per-user OAuth** — Each user connects their own Zoom account via OAuth. Webhook-fired downloads parse VTT transcripts, extract Q&A pairs via AI, and dual-publish: `ZoomInsight` (admin-reviewed) and `TranscriptKnowledge` (auto-approved, immediately vector-searchable). Includes retry + dead-letter queue for failed meetings and admin backfill for historical meetings. See [docs/PIPELINES.md#4-zoom-ingestion-pipeline](docs/PIPELINES.md).
+- **AI auto-answer pipeline for community posts** — A scheduler (every 24h) finds unanswered posts, searches the knowledge base, and either auto-posts an answer (≥0.85 confidence), queues for human review (0.60–0.84), or escalates (<0.60 or sensitive topics). Three AI providers compete; per-pipeline configurable. See [docs/PIPELINES.md#1-auto-answer-pipeline](docs/PIPELINES.md).
+- **FAQ audit pipeline** — A scheduler (every 6h) re-evaluates approved FAQs against the live knowledge base (TranscriptKnowledge + ZoomInsights). Uses AI to judge correctness and emits verdicts: `correct` (≥0.80), `drift_detected` (0.60–0.79), `contradiction` (<0.60), or `stale`. Flagged FAQs land in `/admin/faqs/review` with `reviewStatus='pending_review'`, `flagType='auto'`, and an incremented `reviewCycle`. See [docs/PIPELINES.md#2-faq-audit-pipeline](docs/PIPELINES.md).
+- **Soft-delete with anonymization** — Deleting a user never hard-deletes their records. The account is anonymised: `isDeleted=true`, `deletedAt` timestamp, `name` becomes `Deleted User`, `email` is rewritten to a non-routable placeholder, `password` is replaced with a random UUID to break login. All posts, comments, votes, reputation logs, and audit trail entries remain intact — preserving referential integrity, attribution history, and regulatory compliance.
 
-- **AI auto-answer pipeline for community posts** — A scheduler (every 24h) finds unanswered posts, searches the knowledge base, and either auto-posts an answer (≥0.85 confidence), queues for human review (0.60–0.84), or escalates (<0.60 or sensitive topics). Three AI providers compete: per-pipeline configurable. See [docs/PIPELINES.md#1-auto-answer-pipeline](docs/PIPELINES.md).
-
-- **FAQ audit pipeline** — A scheduler (every 6h) re-evaluates approved FAQs against the live knowledge base (TranscriptKnowledge + ZoomInsights). Uses AI to judge correctness and emits verdicts: `correct` (≥0.80), `drift_detected` (0.60–0.79), `contradiction` (<0.60), or `stale` (no KB context + old + never verified). Flagged FAQs land in `/admin/faqs/review` with `reviewStatus='pending_review'`, `flagType='auto'`, and an incremented `reviewCycle`. See [docs/PIPELINES.md#2-faq-audit-pipeline](docs/PIPELINES.md).
-
-- **Soft-delete with anonymization** — Deleting a user never hard-deletes their records. The account is anonymized: `isDeleted=true`, `deletedAt` timestamp, `name` becomes `Deleted User`, `email` is rewritten to a non-routable placeholder, `password` is replaced with a random UUID to break login. All posts, comments, votes, reputation logs, and audit trail entries remain intact and queryable — preserving referential integrity, attribution history, and regulatory compliance.
-
-Other features:
-
-- **Semantic hybrid search** — vector search (768-dim) + keyword search merged via Reciprocal Rank Fusion
-- **Community board** — posts, comments, threaded replies, upvotes, bookmarks, expert verification
-- **Reputation system** — points for accepted answers, badges, leaderboard
-- **SpillTheTea notifications** — event-driven notification system
+Other capabilities: semantic hybrid search, community Q&A board, reputation system + badges + leaderboard, SpillTheTea event-driven notifications, per-user Zoom OAuth, RAG-powered `/ask-ai` assistant, soft user lifecycle.
 
 ---
 
 ## Admin Dashboard
 
-The admin panel at `/admin` (mounted at `/api/admin/*`) provides full operational visibility and control:
+The admin panel at `/admin` (mounted at `/api/admin/*`) provides telemetry, moderation, and operational control. Key areas:
 
-### Telemetry & Analytics
-- **Live stats** — `/api/admin/stats`: counts of users, FAQs, community posts, comments, recent activity
-- **FAQ growth chart** — `/api/admin/faq-growth`: time-series of FAQ creation
-- **Top categories** — `/api/admin/top-categories`: most-viewed FAQ categories
-- **Search insights** — `/api/admin/search-insights`: aggregated search analytics (popular queries, no-result queries, success rate)
-- **User activity chart** — `/api/admin/user-activity-chart`: daily active users, signups, post activity
-- **Activity feed** — `/api/admin/activity-feed`: chronological admin-event log
-- **Failed-query analytics** — `/api/analytics/failed-queries`: top 30 zero-result searches in the last 7 days (catches knowledge-base gaps)
-- **Unresolved search tracker** — `/api/analytics/`: queries with no FAQ match (admin can promote them to FAQs)
+- **Telemetry & analytics** — live stats, FAQ growth, top categories, search insights, user-activity charts, activity feed, failed-query analytics, unresolved-search tracker
+- **Operational pages** — AdminDashboard, AdminFAQs, FaqReview, AdminFAQAudit, AdminAutoAnswerQueue, AdminCommunity, AdminUsers, AdminModeration, AdminZoomMeetings, AdminZoomInsights, AdminLeaderboard, AdminUnresolvedSearch, AdminAISettings, AdminSettings, AdminLogin
+- **Moderation** — every ban, suspend, warn, and soft-delete recorded in `ModerationLog`; every reputation change (+2 upvote, +5 accepted answer, -2/-5 on removal) recorded in `ReputationLog`
+- **AI pipeline visibility** — unified `PipelineResult` collection (30-day TTL) for both auto-answer and audit outcomes; Zoom health endpoint reports OAuth/API circuit state, cache hit rate, failing-meetings count, dead-letter count, pending-retry count; Prometheus metrics at `/api/metrics` (search latency, cache hits, RAG duration, queue depth)
 
-### Operational Pages
-- **AdminDashboard** — overview cards with animated count-up + trend badges
-- **AdminFAQs** — full FAQ CRUD, review queue for flagged content
-- **FaqReview** — peer-vote freshness + AI-audit flagged FAQs
-- **AdminFAQAudit** — AI audit results (correct / drift_detected / contradiction / stale)
-- **AdminAutoAnswerQueue** — review queue for AI-suggested answers
-- **AdminCommunity** — post management, comments moderation
-- **AdminUsers** — user listing, role management, ban / suspend / warn actions
-- **AdminModeration** — moderation logs, ban queue
-- **AdminZoomMeetings** — Zoom meeting records, retry/DLQ management, backfill
-- **AdminZoomInsights** — review AI-extracted Q&A from transcripts, convert to FAQ
-- **AdminLeaderboard** — reputation leaderboard with badge progress
-- **AdminUnresolvedSearch** — track and resolve search queries with no FAQ match
-- **AdminAISettings** — per-pipeline AI provider/model configuration
-- **AdminSettings** — app-wide settings, 2FA setup
-- **AdminLogin** — dedicated admin login with 2FA enforcement
-
-### Moderation
-- **Moderation logs** — every ban, suspend, warn, soft-delete recorded with admin id, reason, timestamp
-- **Reputation logs** — every point change (+2 post upvote, +5 comment accepted) recorded for audit
-
-### AI Pipeline Visibility
-- **PipelineResult collection** — unified log of every auto-answer and audit outcome (30-day TTL)
-- **Zoom health** — `/api/zoom/health`: OAuth circuit state, API circuit state, cache hit rate, failing-meetings count, dead-letter count, pending-retry count
-- **Prometheus metrics** — `/api/metrics`: search latency, cache hits, RAG duration, queue depth
+For the full admin route map and per-page behaviour, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
 ## User Experience
 
-The user-facing app (`/`, `/faq`, `/community`, `/saved`, `/account`) gives authenticated users full participation in the knowledge loop.
+The user-facing app (`/`, `/faq`, `/community`, `/saved`, `/account`, `/leaderboard`) gives authenticated users full participation in the knowledge loop:
 
-### Pages
-- **HomePage** — hero search bar (floating bottom-center glassmorphism), trending FAQs, category grid
-- **FAQPage** — FAQ category browser with full-text + semantic search
-- **CommunityPage** — community Q&A board with stats banner, post cards, sort + filter
-- **SavedKnowledgePage** — bookmarked FAQs and community posts in one place
-- **AccountPage** — profile management, Zoom OAuth connect/disconnect, manual transcript upload
-- **LeaderboardPage** — public reputation leaderboard
+- **Discover** — hybrid semantic + keyword search at `/api/search` (public), semantic suggestions at `/api/search/suggest`, category browsing
+- **Ask the community** — post creation with Zod validation, debounced duplicate detection against the FAQ base (banner + block on match), auto-normalised tags, Cloudinary image attachments
+- **Engage** — upvotes with reputation-farming prevention (reverses on removal), bookmarks at `/saved`, nested comment threads with optimistic UI, accept-answer (locks verified/expert comments from edit), edit/delete own comments, share via clipboard, report and flag-outdated
+- **Notifications** — in-app bell, SpillTheTea event stream (`post_answered`, `post_deleted`, etc.), per-event-type settings, email + SMS delivery
+- **Reputation** — points for accepted answers, badges at thresholds, expert promotion by peer vote, public leaderboard
+- **AI assistant** — RAG-powered `/ask-ai` (5/day anonymous quota via localStorage, unlimited for authenticated users), sources cited
+- **Zoom integration** — per-user OAuth from `/account`, manual `.vtt` / `.txt` / raw-text upload, last-synced status card, no admin required
+- **Search feedback** — "Report missing FAQ" on zero results, admin-promotable to FAQ
 
-### Ask the Community
-- **Post creation** — `/api/community/` with Zod-validated title + body
-- **Duplicate detection** — `/api/community/check-duplicate` (debounced 500ms, min 10 chars) shows clickable banner when similar FAQ exists, blocks form submission on match
-- **Tags** — auto-normalized to lowercase for consistent search
-- **Attachments** — Cloudinary image uploads inline with the post body
-
-### Read & Engage
-- **Search** — `/api/search` (public): hybrid vector + keyword, RRF-merged, LRU + Redis cached
-- **Semantic suggest** — `/api/search/suggest` (public, rate-limited 30/min)
-- **Post detail modal** — full thread with status pill, lifecycle badge, vote counts, bookmark, share, attachments lightbox, comments
-- **Comment thread** — nested comments (max depth rendered), upvote/downvote with optimistic UI
-- **Accept answer** — post author can mark a comment as the accepted answer (locks verified/expert comments from edit)
-- **Edit & delete comments** — author can edit/delete own comments; admins can delete any
-- **Upvote posts** — `/api/community/:id/upvote` with reputation farming prevention (reverses +2 on removal)
-- **Bookmark** — `/api/community/:id/bookmark` toggle; bookmarks appear at `/saved`
-- **Share** — clipboard copy with confirmation toast
-- **Report** — flag inappropriate posts and FAQs for admin review
-- **Flag outdated** — `/api/faq/:id/flag` for FAQs that are no longer accurate
-
-### Notifications
-- **In-app bell** — `NotificationBell` component with unread count
-- **SpillTheTea events** — `post_answered`, `post_deleted`, `post_answered_user` etc. push to relevant users
-- **Notification settings** — per-event-type opt-in
-- **Email/SMS** — Twilio + SMTP for out-of-app delivery
-
-### Reputation
-- **Points** — +2 per post upvote, +5 per accepted comment, -2/-5 on removal
-- **Badges** — earned at thresholds (Newcomer, Contributor, Expert, etc.)
-- **Promotion to expert** — automatic review at reputation threshold; peers vote
-- **Leaderboard** — public ranking at `/leaderboard`
-
-### AI Assistant (`/ask-ai`)
-- **RAG-powered Q&A** — `/api/ask-ai` (public, 5/day anonymous quota via localStorage)
-- **Authenticated** — unlimited usage tied to account
-- **Sources cited** — every answer returns the top-k source FAQs / transcript knowledge used
-
-### Zoom Integration
-- **Per-user OAuth** — connect your own Zoom account from `/account`
-- **Manual upload** — upload `.vtt`, `.txt`, or paste raw text directly
-- **Status card** — shows last synced timestamp, OAuth health, failing-meeting count
-- **No admin required** — users own their ingestion flow end-to-end
-
-### Search Feedback
-- **"Report missing FAQ"** — when no results match, submit a query for admin follow-up
-- **Zero-result tracker** — admins can promote popular no-result queries to FAQs
+For per-route behaviour and field schemas, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -255,7 +110,9 @@ shamagama/
 ├── frontend/          # React + Vite SPA
 ├── docs/              # Full documentation
 ├── run.sh             # Local dev runner (env setup, ngrok, backend + frontend)
-└── logs/              # Session logs from run.sh
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+└── LICENSE
 ```
 
 ---
@@ -263,7 +120,7 @@ shamagama/
 ## Environment Variables
 
 Required: `MONGODB_URI`, `JWT_SECRET`
-Optional: `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` / `MINIMAX_API_KEY` (AI providers), Zoom OAuth credentials, Cloudinary, Sentry, Twilio, SMTP, Upstash Redis
+Optional: at least one AI provider key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` / `MINIMAX_API_KEY`), Zoom OAuth credentials, `CLOUDINARY_*`, `SENTRY_DSN`, Twilio + SMTP for notifications, `UPSTASH_REDIS_*`
 
 See [docs/ARCHITECTURE.md#10-env-variables-reference](docs/ARCHITECTURE.md#10-env-variables-reference) for the full list.
 
