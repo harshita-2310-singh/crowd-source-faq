@@ -81,24 +81,49 @@ export function BatchProvider({ children }: BatchProviderProps): React.ReactElem
   }, []);
 
   // ── Pick the initial batch per the resolution order in the file header ──
+  //
+  // Among the candidates returned by the API, prefer a batch that already
+  // has FAQs — otherwise the home page lands on an empty program (e.g. a
+  // newly-created "test" batch) and the public visitor sees three "no data"
+  // cards with no obvious next step. We only do this auto-pick on the
+  // initial resolution / refresh; explicit user choice via setCurrentBatch
+  // is never overridden.
   const resolveInitial = useCallback((batches: Batch[], fromUrl: string | null): Batch | null => {
     if (batches.length === 0) return null;
 
+    let picked: Batch | undefined;
+
     if (fromUrl) {
-      const fromUrlMatch = batches.find((b) => b._id === fromUrl);
-      if (fromUrlMatch) return fromUrlMatch;
+      picked = batches.find((b) => b._id === fromUrl);
     }
 
-    let stored: string | null = null;
-    try {
-      stored = window.localStorage.getItem(STORAGE_KEY);
-    } catch { /* localStorage disabled */ }
-    if (stored) {
-      const storedMatch = batches.find((b) => b._id === stored);
-      if (storedMatch) return storedMatch;
+    if (!picked) {
+      let stored: string | null = null;
+      try {
+        stored = window.localStorage.getItem(STORAGE_KEY);
+      } catch { /* localStorage disabled */ }
+      if (stored) {
+        picked = batches.find((b) => b._id === stored);
+      }
     }
 
-    return batches[0];
+    if (!picked) {
+      // Cold-start default: prefer a non-empty batch so the home page
+      // actually has data to show.
+      picked = batches.find((b) => b.faqCount > 0) ?? batches[0];
+    } else if (picked.faqCount === 0) {
+      // The stored / deep-linked batch is empty AND a non-empty alternative
+      // exists — auto-promote to the non-empty one so the page isn't a
+      // dead end. Persist the new pick so the user doesn't bounce back on
+      // the next reload.
+      const nonEmpty = batches.find((b) => b.faqCount > 0);
+      if (nonEmpty) {
+        picked = nonEmpty;
+        try { window.localStorage.setItem(STORAGE_KEY, nonEmpty._id); } catch { /* ignore */ }
+      }
+    }
+
+    return picked;
   }, []);
 
   // ── Initial mount: fetch + resolve ──────────────────────────────────────
@@ -171,10 +196,12 @@ export function BatchProvider({ children }: BatchProviderProps): React.ReactElem
     setLoading(true);
     const batches = await loadBatches();
     setAvailableBatches(batches);
-    // If the current batch disappeared, pick the first available.
+    // If the current batch disappeared, pick a non-empty alternative first,
+    // then fall back to the first batch (preserves the old behaviour when
+    // no batch has data).
     setCurrentBatchState((prev) => {
       if (prev && batches.some((b) => b._id === prev._id)) return prev;
-      return batches[0] ?? null;
+      return batches.find((b) => b.faqCount > 0) ?? batches[0] ?? null;
     });
     setLoading(false);
   }, [loadBatches]);
