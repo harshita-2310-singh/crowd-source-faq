@@ -1,6 +1,10 @@
 #!/bin/bash
 # ============================================================
 # Yaksha FAQ Portal — Full Stack Runner (with env setup)
+#
+# Tags: [ALERT] = red+bold, [INFO] = blue, [OK] = green, [WARN] = yellow
+# Mirrors the backend logger so you can grep your way through.
+#
 # Usage: ./run.sh
 # ============================================================
 
@@ -11,42 +15,46 @@ ROOT="$SCRIPT_DIR"
 BACKEND="$ROOT/backend"
 FRONTEND="$ROOT/frontend"
 
-FONT="\033[94m"
-OK="\033[92m"
-WARN="\033[93m"
-ERROR="\033[91m"
-RESET="\033[0m"
+# ── Terminal colors (ANSI) ───────────────────────────────────────────────────
+F_INFO="\033[94m"
+F_OK="\033[92m"
+F_WARN="\033[93m"
+F_ALERT="\033[1;31m"
+F_DIM="\033[2m"
+F_BOLD="\033[1m"
+F_RESET="\033[0m"
 
-log()  { echo -e "${FONT}[yaksha]${RESET} $1"; }
-ok()   { echo -e "${OK}[✔]${RESET} $1"; }
-warn() { echo -e "${WARN}[!]${RESET} $1"; }
-die()  { echo -e "${ERROR}[✘]${RESET} $1" >&2; exit 1; }
+# ── Tagged log helpers ──────────────────────────────────────────────────────
+log()   { echo -e "${F_INFO}[INFO]${F_RESET} $1"; }
+ok()    { echo -e "${F_OK}[OK]${F_RESET}   $1"; }
+warn()  { echo -e "${F_WARN}[WARN]${F_RESET} $1"; }
+alert() { echo -e "${F_ALERT}[ALERT]${F_RESET} $1"; }
+dim()   { echo -e "${F_DIM}       $1${F_RESET}"; }
+die()   { alert "$1" >&2; exit 1; }
 
 NGROK_PID=""
 FRONTEND_PID=""
 
 cleanup() {
   echo ""
-  warn "Shutting down..."
-  # Read PID from file if set
+  alert "shutdown initiated — signal received"
   [ -z "$BACKEND_PID" ] && [ -f /tmp/yaksha-backend.pid ] && BACKEND_PID=$(cat /tmp/yaksha-backend.pid)
   [ -n "$BACKEND_PID" ] && kill $BACKEND_PID 2>/dev/null || true
   [ -n "$FRONTEND_PID" ] && kill $FRONTEND_PID 2>/dev/null || true
   [ -n "$NGROK_PID" ] && kill $NGROK_PID 2>/dev/null || true
-  # Clean up orphaned tsx processes on port 6767
   pkill -f "tsx.*server" 2>/dev/null || true
   rm -f /tmp/yaksha-backend.pid
-  ok "Done."
+  ok "shutdown complete"
   exit 0
 }
 trap cleanup SIGINT SIGTERM
 
-# ── Ensure .env exists ─────────────────────────────────────────────────────────
+# ── Ensure .env exists ────────────────────────────────────────────────────────
 ensure_env() {
   local env_file="$BACKEND/.env"
   if [ ! -f "$env_file" ]; then
     if [ -f "$BACKEND/.env.example" ]; then
-      log "Creating .env from .env.example..."
+      log "creating .env from .env.example"
       cp "$BACKEND/.env.example" "$env_file"
     else
       touch "$env_file"
@@ -82,7 +90,7 @@ prompt_if_missing() {
   [ -n "$current" ] && return 0
 
   echo ""
-  echo -e "${WARN}Missing: ${var_name}${RESET}"
+  echo -e "${F_WARN}[WARN]${F_RESET} missing: ${F_BOLD}${var_name}${F_RESET}"
   echo -e "  $description"
   echo -n "  Enter value: "
   read -r value
@@ -90,7 +98,7 @@ prompt_if_missing() {
     die "${var_name} is required — cannot continue"
   fi
   write_env_local "$var_name" "$value"
-  ok "Saved ${var_name}"
+  ok "saved ${var_name}"
 }
 
 # ── Optional var prompt ────────────────────────────────────────────────────────
@@ -102,10 +110,10 @@ prompt_optional() {
   [ -n "$current" ] && return 0
 
   echo ""
-  echo -e "  ${description}"
+  echo -e "  ${F_DIM}${description}${F_RESET}"
   echo -n "  Enter value (or press Enter to skip): "
   read -r value
-  [ -n "$value" ] && write_env_local "$var_name" "$value" && ok "Saved ${var_name}"
+  [ -n "$value" ] && write_env_local "$var_name" "$value" && ok "saved ${var_name}"
 }
 
 # ── Setup env vars ─────────────────────────────────────────────────────────────
@@ -136,7 +144,7 @@ setup_env() {
 
   if [ "$all_set" = true ]; then
     echo ""
-    ok "All required env vars found in .env / .env.local — skipping prompts."
+    ok "all required env vars found in .env / .env.local — skipping prompts"
     echo ""
     return 0
   fi
@@ -157,17 +165,19 @@ setup_env() {
   prompt_optional "ZOOM_CLIENT_SECRET"  "ZOOM_CLIENT_SECRET (from Zoom App marketplace)"
   prompt_optional "REDIS_URL"           "REDIS_URL (Upstash Redis — enables cross-instance cache)"
   prompt_optional "REDIS_TOKEN"         "REDIS_TOKEN (Upstash REST API token)"
+  prompt_optional "REDIS_TCP_URL"       "REDIS_TCP_URL (BullMQ TCP — enables OCR / document pipeline)"
   prompt_optional "SENTRY_DSN"          "SENTRY_DSN (Sentry error tracking DSN)"
+  prompt_optional "DISCORD_WEBHOOK_URL" "DISCORD_WEBHOOK_URL (channel webhook — ALERTs ping Discord when set)"
 
   echo ""
-  ok "Env setup complete — saved to .env.local"
+  ok "env setup complete — saved to .env.local"
 }
 
 # ── Wait for backend ─────────────────────────────────────────────────────────────
 wait_for_backend() {
   local max_wait=20
   local waited=0
-  log "Waiting for backend to be ready..."
+  log "waiting for backend to be ready..."
   while [ $waited -lt $max_wait ]; do
     local status
     status=$(curl -sf --max-time 2 http://localhost:6767/api/health 2>/dev/null \
@@ -181,12 +191,12 @@ wait_for_backend() {
     waited=$((waited + 2))
     echo -n "."
   done
-  warn "Backend DB not connected after ${max_wait}s — continuing anyway"
+  warn "backend DB not connected after ${max_wait}s — continuing anyway"
 }
 
 # ── Start backend ──────────────────────────────────────────────────────────────
 start_backend() {
-  log "Starting backend..."
+  log "starting backend..."
   cd "$BACKEND"
   set -a
   source ".env" 2>/dev/null || true
@@ -206,24 +216,30 @@ start_backend() {
   # Keep latest symlink for easy access
   ln -sf "session_${SESSION_TIMESTAMP}.txt" "$ROOT/main_log.txt" 2>/dev/null || true
 
-  # Run tsx — prefix with [backend], tee to session log
+  # Run tsx — prefix each line with [backend] dim tag for greppable scrollback.
   ../node_modules/.bin/tsx watch server.ts 2>&1 | \
-    sed -u "s/^\([^[]]*\)/[backend] \1/" | \
+    sed -u "s/^\([^[]]*\)/${F_DIM}[backend]${F_RESET} \1/" | \
     tee "$SESSION_LOG" &
   BACKEND_PID=$!
   echo $BACKEND_PID > /tmp/yaksha-backend.pid
-  ok "Backend PID $BACKEND_PID — logs: $SESSION_LOG"
+  ok "backend pid $BACKEND_PID — log: $SESSION_LOG"
+
+  if [ -n "$DISCORD_WEBHOOK_URL" ] && [ "$DISCORD_WEBHOOK_URL" != "###" ]; then
+    ok "discord webhook configured — ALERTs will ping your channel"
+  else
+    dim "discord webhook not configured (DISCORD_WEBHOOK_URL=###) — ALERTs only hit console"
+  fi
 }
 
 # ── Start ngrok (tunnel to expose local backend for Zoom webhook) ──────────────
 start_ngrok() {
   local ngrok_token=$(grep "^NGROK_AUTH_TOKEN=" "$BACKEND/.env.local" 2>/dev/null | cut -d'=' -f2- | sed "s/^['\"]//g;s/['\"]$//g")
   if [ -z "$ngrok_token" ]; then
-    warn "NGROK_AUTH_TOKEN not found in .env.local — skipping ngrok"
+    dim "NGROK_AUTH_TOKEN not set — skipping ngrok tunnel"
     return 0
   fi
 
-  log "Starting ngrok tunnel to port 6767..."
+  log "starting ngrok tunnel to port 6767..."
   ngrok config add-authtoken "$ngrok_token" 2>/dev/null || true
   ngrok http 6767 --log=stdout > /tmp/ngrok.log 2>&1 &
   NGROK_PID=$!
@@ -232,21 +248,21 @@ start_ngrok() {
   # Extract the HTTPS URL
   local ngrok_url=$(grep -o 'https://[a-zA-Z0-9-]*\.ngrok-free\.app' /tmp/ngrok.log 2>/dev/null | head -1 || true)
   if [ -n "$ngrok_url" ]; then
-    ok "Ngrok tunnel: $ngrok_url"
+    ok "ngrok tunnel: $ngrok_url"
     # Update ZOOM_REDIRECT_URI in .env.local if it has the old ngrok URL
     local old_url=$(grep "^ZOOM_REDIRECT_URI=" "$BACKEND/.env.local" 2>/dev/null | cut -d'=' -f2- | sed "s/^['\"]//g;s/['\"]$//g")
     if [ -n "$old_url" ]; then
       sed -i '' "s|^ZOOM_REDIRECT_URI=.*|ZOOM_REDIRECT_URI=${ngrok_url}/api/zoom/auth/callback|" "$BACKEND/.env.local"
-      ok "Updated ZOOM_REDIRECT_URI → ${ngrok_url}/api/zoom/auth/callback"
+      ok "updated ZOOM_REDIRECT_URI → ${ngrok_url}/api/zoom/auth/callback"
     fi
   else
-    warn "Could not detect ngrok URL — check /tmp/ngrok.log"
+    warn "could not detect ngrok URL — check /tmp/ngrok.log"
   fi
 }
 
 # ── Start frontend ──────────────────────────────────────────────────────────────
 start_frontend() {
-  log "Starting frontend..."
+  log "starting frontend..."
   cd "$FRONTEND"
 
   # Reuse the same session log file that backend started
@@ -257,12 +273,12 @@ start_frontend() {
     touch "$SESSION_LOG"
   fi
 
-  # Run vite — prefix with [frontend], append to session log
+  # Run vite — prefix with [frontend] dim tag, append to session log
   npm run dev 2>&1 | \
-    sed -u "s/^\([^[]]*\)/[frontend] \1/" | \
+    sed -u "s/^\([^[]]*\)/${F_DIM}[frontend]${F_RESET} \1/" | \
     tee -a "$SESSION_LOG" &
   FRONTEND_PID=$!
-  ok "Frontend PID $FRONTEND_PID — logs in this terminal"
+  ok "frontend pid $FRONTEND_PID — log: $SESSION_LOG"
 }
 
 # ── Kill existing processes ──────────────────────────────────────────────────────
@@ -271,12 +287,12 @@ kill_existing() {
   for port in 5173 6767; do
     local pid=$(lsof -ti:$port 2>/dev/null || true)
     if [ -n "$pid" ]; then
-      warn "Killing existing process on port $port (PID $pid)"
+      warn "killing existing process on port $port (pid $pid)"
       kill -9 $pid 2>/dev/null || true
       killed=1
     fi
   done
-  [ $killed -eq 1 ] && sleep 1 && ok "Cleared."
+  [ $killed -eq 1 ] && sleep 1 && ok "cleared"
 }
 
 check_url_alive() {
@@ -285,16 +301,16 @@ check_url_alive() {
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 echo ""
-log "Yaksha FAQ Portal"
+alert "Yaksha FAQ Portal — full stack runner"
 echo ""
 
 setup_env
 
 if check_url_alive; then
-  warn "Frontend already live on 5173 — clearing ports"
+  warn "frontend already live on 5173 — clearing ports"
   kill_existing
 else
-  ok "Port 5173 is free"
+  ok "port 5173 is free"
 fi
 
 start_ngrok
@@ -303,10 +319,10 @@ wait_for_backend
 start_frontend
 
 echo ""
-ok "Backend  →  http://localhost:6767"
-ok "Frontend →  http://localhost:5173"
+ok "backend  →  http://localhost:6767"
+ok "frontend →  http://localhost:5173"
 echo ""
-log "Press Ctrl+C to stop"
+dim "press Ctrl+C to stop (ALERT will fire to Discord if configured)"
 echo ""
 
 wait
