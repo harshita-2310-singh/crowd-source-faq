@@ -25,6 +25,7 @@ import { logger } from '../utils/http/logger.js';
 import { searchKnowledge } from '../services/knowledgeBase.js';
 import { chatWithConfig } from '../utils/ai/aiProvider.js';
 import { getPipelineProviderConfig } from '../utils/ai/aiProvider.js';
+import { stripAllWrappers, extractJsonSubstring } from '../utils/ai/aiResponseParsers.js';
 import { PipelineResult } from '../models/PipelineResult.js';
 import {
   searchKnowledgeWithFallback,
@@ -196,12 +197,27 @@ Respond with ONLY a valid JSON object:`;
     confidence?: number;
   };
   try {
-    // Strip markdown code fences if present
-    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    // MiniMax-M3 (and most chain-of-thought models) wraps the
+    // answer in `<think>…</think>` blocks before the actual JSON.
+    // stripAllWrappers also handles ```json fences and leading
+    // prose. extractJsonSubstring is the catch-all that finds the
+    // outermost {…} when nothing else matches.
+    const cleaned = stripAllWrappers(raw);
     parsed = JSON.parse(cleaned);
   } catch {
-    logger.warn(`[faqAudit] Failed to parse AI response for FAQ ${_id}: ${raw.slice(0, 100)}`);
-    return null;
+    const recovered = extractJsonSubstring(stripAllWrappers(raw));
+    if (recovered !== null) {
+      try {
+        parsed = JSON.parse(recovered);
+        logger.info(`[faqAudit] recovered JSON from substring extraction (${recovered.length} chars) for FAQ ${_id}`);
+      } catch (err2) {
+        logger.warn(`[faqAudit] Failed to parse AI response for FAQ ${_id}: ${raw.slice(0, 100)}`);
+        return null;
+      }
+    } else {
+      logger.warn(`[faqAudit] Failed to parse AI response for FAQ ${_id}: ${raw.slice(0, 100)}`);
+      return null;
+    }
   }
 
   const { overall = 0.5, verdict = 'correct', reason = 'No reason provided', confidence = 0.5 } = parsed;
