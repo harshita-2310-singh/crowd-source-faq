@@ -13,20 +13,32 @@ export const autoAwardBadges = async (userId: string): Promise<void> => {
 
     const allBadges = await Badge.find({ active: true, actionTrigger: 'auto' });
 
+    // v1.68 — C2 fix: the previous code did
+    //   const already = some(...); if (!already) push(...); user.save();
+    // which is a check-then-act race. Two concurrent calls for
+    // the same user could both pass the `some` check, both push,
+    // and both save() — leaving the user with duplicate badges.
+    // Fix: use atomic findOneAndUpdate with a `$ne` filter that
+    // excludes users already having the badge. The operation
+    // either succeeds (badge added) or no-ops (already had it).
     for (const badge of allBadges) {
-      // Points-based badges
-      if (badge.pointsRequired !== undefined && badge.pointsRequired !== null) {
-        if (user.points >= badge.pointsRequired) {
-          const list = badge.type === 'positive' ? 'positiveBadges' : 'negativeBadges';
-          const already = (user[list] as any[]).some(b => b.badgeId.toString() === badge._id.toString());
-          if (!already) {
-            (user[list] as any[]).push({ badgeId: badge._id.toString(), reason: `Auto-awarded: reached ${user.points} points` });
-          }
-        }
-      }
-    }
+      if (badge.pointsRequired === undefined || badge.pointsRequired === null) continue;
+      if (user.points < badge.pointsRequired) continue;
 
-    await user.save();
+      const list = badge.type === 'positive' ? 'positiveBadges' : 'negativeBadges';
+      await User.findOneAndUpdate(
+        { _id: userId, [`${list}.badgeId`]: { $ne: badge._id } },
+        {
+          $push: {
+            [list]: {
+              badgeId: badge._id,
+              reason: `Auto-awarded: reached ${user.points} points`,
+              awardedAt: new Date(),
+            },
+          },
+        },
+      );
+    }
   } catch (err) {
     // Silently fail — badge award should never break main flows, but log warning
     logger.warn(`[reputation] autoAwardBadges failed for user ${userId}: ${(err as Error).message}`);
@@ -100,19 +112,41 @@ export const issueBadge = async (req: Request, res: Response): Promise<void> => 
     const { userId, badgeId, reason } = req.body;
     if (!userId || !badgeId) { res.status(400).json({ message: 'userId and badgeId required' }); return; }
 
-    const [user, badge] = await Promise.all([
-      User.findById(userId),
-      Badge.findById(badgeId),
-    ]);
-    if (!user) { res.status(404).json({ message: 'User not found' }); return; }
+    // Verify user + badge exist before doing the atomic write.
+    // The atomic findOneAndUpdate below would no-op (return null)
+    // both for "user not found" AND "user already has the badge",
+    // so we disambiguate up front.
+    const badge = await Badge.findById(badgeId);
     if (!badge) { res.status(404).json({ message: 'Badge not found' }); return; }
+    const user = await User.findById(userId).select('_id');
+    if (!user) { res.status(404).json({ message: 'User not found' }); return; }
 
     const badgeList = badge.type === 'positive' ? 'positiveBadges' : 'negativeBadges';
-    const already = (user[badgeList] as any[]).some(b => b.badgeId.toString() === badgeId);
-    if (already) { res.status(409).json({ message: 'Badge already awarded' }); return; }
 
-    (user[badgeList] as any[]).push({ badgeId, reason, awardedBy: (req as any).user?.id });
-    await user.save();
+    // v1.68 — C2 fix: the previous code did
+    //   const already = some(...); if (!already) push(...); user.save();
+    // Two concurrent admin actions could both pass the check
+    // and both save() — leaving the user with duplicate badges.
+    // Fix: atomic findOneAndUpdate with a `$ne` filter that
+    // excludes users already having the badge.
+    const updated = await User.findOneAndUpdate(
+      { _id: userId, [`${badgeList}.badgeId`]: { $ne: badge._id } },
+      {
+        $push: {
+          [badgeList]: {
+            badgeId: badge._id,
+            reason,
+            awardedBy: (req as any).user?.id,
+            awardedAt: new Date(),
+          },
+        },
+      },
+      { new: true, projection: { [badgeList]: 1 } },
+    );
+    if (!updated) {
+      res.status(409).json({ message: 'Badge already awarded' });
+      return;
+    }
 
     if (badge.type === 'negative') {
       await ReputationLog.create({
@@ -123,7 +157,7 @@ export const issueBadge = async (req: Request, res: Response): Promise<void> => 
       });
     }
 
-    res.json({ userId, badge: { name: badge.name, slug: badge.slug, type: badge.type }, badges: user[badgeList] });
+    res.json({ userId, badge: { name: badge.name, slug: badge.slug, type: badge.type }, badges: updated[badgeList] });
   } catch (error) {
     res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
   }
@@ -300,16 +334,25 @@ export const autoCheckBadges = async (userId: string): Promise<void> => {
 
     const allBadges = await Badge.find({ actionTrigger: 'auto', active: true });
 
+    // v1.68 — C2 fix (same pattern as autoAwardBadges above).
+    // Use atomic findOneAndUpdate with a `$ne` filter to avoid
+    // duplicate badges under concurrent calls.
     for (const badge of allBadges) {
       if (!badge.pointsRequired) continue;
-      if (user.points >= badge.pointsRequired) {
-        const already = user.positiveBadges.some(b => b.badgeId.toString() === badge._id.toString());
-        if (!already) {
-          user.positiveBadges.push({ badgeId: badge._id });
-        }
-      }
+      if (user.points < badge.pointsRequired) continue;
+
+      await User.findOneAndUpdate(
+        { _id: userId, 'positiveBadges.badgeId': { $ne: badge._id } },
+        {
+          $push: {
+            positiveBadges: {
+              badgeId: badge._id,
+              awardedAt: new Date(),
+            },
+          },
+        },
+      );
     }
-    await user.save();
   } catch (err) {
     logger.warn(`[reputation] autoCheckBadges failed for user ${userId}: ${(err as Error).message}`);
   }
