@@ -20,7 +20,9 @@ import { createTeaDrop } from './teaNotificationController.js';
 import ReputationLog from '../models/ReputationLog.js';
 import { autoAwardBadges } from './reputationController.js';
 import { sanitizeHtml } from '../utils/http/sanitize.js';
-import { logger } from '../utils/http/logger.js';
+// v1.68 — L1: communityLog replaces the bare `logger` so all
+// post/comment/upvote log lines carry the [community] tag.
+import { communityLog } from '../utils/http/logger.js';
 import { checkDuplicate } from './postDuplicateController.js';
 import { assertCanCreateContent } from '../utils/banUtils.js';
 
@@ -70,7 +72,7 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
     try {
       embedding = await generateEmbedding(`Question: ${title}. Description: ${body}`);
     } catch (err) {
-      logger.warn(`Failed to generate embedding for post: ${(err as Error).message}`);
+      communityLog.warn(`Failed to generate embedding for post: ${(err as Error).message}`);
     }
 
     // Validate attachments: cap at 4, drop malformed entries, ensure URLs
@@ -137,12 +139,12 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
 
     // Invalidate search cache so new post appears in community search immediately
     await invalidateCache().catch((err) => {
-      logger.warn(`[post] Failed to invalidate cache on post creation: ${(err as Error).message}`);
+      communityLog.warn(`[post] Failed to invalidate cache on post creation: ${(err as Error).message}`);
     });
 
     res.status(201).json({ post });
   } catch (error) {
-    logger.error(`[post] createPost failed: ${(error as Error).message}`);
+    communityLog.error(`[post] createPost failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -174,7 +176,7 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
     // Check if this upvote just crossed the promotion threshold
     if (!alreadyUpvoted) {
       const { checkPromotionEligibility, startPromotionReview } = await import('../services/promotionService.js').catch((err) => {
-        logger.warn(`[post] Failed to dynamically import promotionService: ${(err as Error).message}`);
+        communityLog.warn(`[post] Failed to dynamically import promotionService: ${(err as Error).message}`);
         return { checkPromotionEligibility: null, startPromotionReview: null };
       });
       if (checkPromotionEligibility && startPromotionReview) {
@@ -182,10 +184,10 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
           const eligible = await checkPromotionEligibility(updated ?? post);
           if (eligible && !(updated ?? post).promotionPendingAt) {
             await startPromotionReview(updated ?? post, userId);
-            logger.info(`Post ${(updated ?? post)._id} crossed threshold, entered promotion review`);
+            communityLog.info(`Post ${(updated ?? post)._id} crossed threshold, entered promotion review`);
           }
         } catch (e) {
-          logger.warn(`Promotion eligibility check failed: ${(e as Error).message}`);
+          communityLog.warn(`Promotion eligibility check failed: ${(e as Error).message}`);
         }
       }
     }
@@ -207,7 +209,7 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
         eventType: 'upvote',
         link: `/community?post=${post._id}`,
       }).catch((err) => {
-        logger.warn(`[post] Failed to dispatch upvote notification: ${(err as Error).message}`);
+        communityLog.warn(`[post] Failed to dispatch upvote notification: ${(err as Error).message}`);
       });
       // Tea drop: your post was upvoted
       createTeaDrop({
@@ -218,7 +220,7 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
         triggeredBy: req.user!._id,
         triggeredByName: req.user!.name,
       }).catch((err) => {
-        logger.warn(`[post] Failed to create tea drop for upvote: ${(err as Error).message}`);
+        communityLog.warn(`[post] Failed to create tea drop for upvote: ${(err as Error).message}`);
       });
       // Award +2 points to post author for receiving question upvote (knowledge-lifecycle-design.md)
       const updatedAuthor = await User.findByIdAndUpdate(
@@ -231,7 +233,7 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
         await updatedAuthor.save();
         // Auto-award tier badges if threshold crossed
         autoAwardBadges(post.author.toString()).catch((err) => {
-          logger.warn(`[post] Failed to auto-award badges to ${post.author}: ${(err as Error).message}`);
+          communityLog.warn(`[post] Failed to auto-award badges to ${post.author}: ${(err as Error).message}`);
         });
       }
       await ReputationLog.create({
@@ -246,7 +248,7 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
 
     res.json({ upvotes: newUpvotes, upvotedByMe: !alreadyUpvoted });
   } catch (error) {
-    logger.error(`[post] toggleUpvote failed: ${(error as Error).message}`);
+    communityLog.error(`[post] toggleUpvote failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -300,7 +302,7 @@ export const reportPost = async (req: Request<{ id: string }, {}, { reason: stri
 
     res.json({ message: 'Report submitted. Thank you.' });
   } catch (error) {
-    logger.error(`[post] reportPost failed: ${(error as Error).message}`);
+    communityLog.error(`[post] reportPost failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -329,7 +331,7 @@ export const deletePost = async (req: Request, res: Response): Promise<void> => 
         triggeredBy: req.user!._id,
         triggeredByName: req.user!.name,
       }).catch((err) => {
-        logger.warn(`[post] Failed to create tea drop for deleted post: ${(err as Error).message}`);
+        communityLog.warn(`[post] Failed to create tea drop for deleted post: ${(err as Error).message}`);
       });
     }
 
@@ -337,12 +339,12 @@ export const deletePost = async (req: Request, res: Response): Promise<void> => 
 
     // Invalidate search cache so deleted post is removed from results
     await invalidateCache().catch((err) => {
-      logger.warn(`[post] Failed to invalidate cache on post delete: ${(err as Error).message}`);
+      communityLog.warn(`[post] Failed to invalidate cache on post delete: ${(err as Error).message}`);
     });
 
     res.json({ message: 'Post deleted successfully.' });
   } catch (error) {
-    logger.error(`[post] deletePost failed: ${(error as Error).message}`);
+    communityLog.error(`[post] deletePost failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
