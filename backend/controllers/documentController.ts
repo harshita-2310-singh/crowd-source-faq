@@ -34,7 +34,7 @@ import { Types } from 'mongoose';
 import multer from 'multer';
 import DocumentRecord, { type IDocumentRecord } from '../models/DocumentRecord.js';
 import DocumentInsight, { type IDocumentInsight } from '../models/DocumentInsight.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 import { addDocumentJob, isDocumentQueueEnabled } from '../utils/jobs/documentQueue.js';
 import { runPromotePopularDocumentInsights } from '../controllers/documentPromotionController.js';
 import { createIdentityLimiter } from '../utils/auth/rateLimit.js';
@@ -149,7 +149,7 @@ export async function uploadDocument(req: Request, res: Response): Promise<void>
     record.jobId = jobId;
     await record.save();
   } catch (err) {
-    logger.error(`[documentController] enqueue failed for ${record._id}: ${(err as Error).message}`);
+    adminLog.error(`[documentController] enqueue failed for ${record._id}: ${(err as Error).message}`);
     record.status = 'failed';
     record.errorMessage = `Failed to enqueue: ${(err as Error).message}`;
     await record.save();

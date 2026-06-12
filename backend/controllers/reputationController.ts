@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import User, { calculateTier } from '../models/User.js';
 import ReputationLog from '../models/ReputationLog.js';
 import Badge from '../models/Badge.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 
 // ─── Auto Badge Awarder ─────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ export const autoAwardBadges = async (userId: string): Promise<void> => {
     }
   } catch (err) {
     // Silently fail — badge award should never break main flows, but log warning
-    logger.warn(`[reputation] autoAwardBadges failed for user ${userId}: ${(err as Error).message}`);
+    adminLog.warn(`[reputation] autoAwardBadges failed for user ${userId}: ${(err as Error).message}`);
   }
 };
 
@@ -354,6 +354,6 @@ export const autoCheckBadges = async (userId: string): Promise<void> => {
       );
     }
   } catch (err) {
-    logger.warn(`[reputation] autoCheckBadges failed for user ${userId}: ${(err as Error).message}`);
+    adminLog.warn(`[reputation] autoCheckBadges failed for user ${userId}: ${(err as Error).message}`);
   }
 };

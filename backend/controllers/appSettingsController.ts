@@ -20,7 +20,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import AppSetting, { readSetting, type SettingKey } from '../models/AppSetting.js';
 import { getAuthedUserId } from './supportCore.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 
 /** Public-safe subset returned to non-admin callers. */
 const PUBLIC_KEYS: SettingKey[] = ['goldenCooldownHours'];
@@ -50,7 +50,7 @@ export async function adminGetSettings(_req: Request, res: Response): Promise<vo
     }
     res.json({ settings: doc?.settings ?? {} });
   } catch (err) {
-    logger.error(`[appSettings] adminGetSettings failed: ${(err as Error).message}`);
+    adminLog.error(`[appSettings] adminGetSettings failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load settings.' });
   }
 }
@@ -100,7 +100,7 @@ export async function adminUpdateSetting(req: Request, res: Response): Promise<v
     ).lean();
     res.json({ settings: doc?.settings ?? {} });
   } catch (err) {
-    logger.error(`[appSettings] adminUpdateSetting failed: ${(err as Error).message}`);
+    adminLog.error(`[appSettings] adminUpdateSetting failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to update setting.' });
   }
 }
@@ -122,7 +122,7 @@ export async function publicGetSettings(_req: Request, res: Response): Promise<v
     }
     res.json({ settings: out });
   } catch (err) {
-    logger.error(`[appSettings] publicGetSettings failed: ${(err as Error).message}`);
+    adminLog.error(`[appSettings] publicGetSettings failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load settings.' });
   }
 }

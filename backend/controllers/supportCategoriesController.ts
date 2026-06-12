@@ -25,7 +25,7 @@ import SupportCategory, {
   type SupportFieldType,
   type SupportIconKey,
 } from '../models/SupportCategory.js';
-import { logger } from '../utils/http/logger.js';
+import { supportLog } from '../utils/http/logger.js';
 import { getAuthedUserId } from './supportCore.js';
 
 function asStringParam(v: string | string[] | undefined): string | undefined {
@@ -53,7 +53,7 @@ export async function listCategories(_req: Request, res: Response): Promise<void
     const cats = await SupportCategory.find({}).sort({ displayOrder: 1, createdAt: 1 }).lean();
     res.json({ categories: cats });
   } catch (err) {
-    logger.error(`[support] listCategories failed: ${(err as Error).message}`);
+    supportLog.error(`[support] listCategories failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load categories.' });
   }
 }
@@ -67,7 +67,7 @@ export async function getCategory(req: Request, res: Response): Promise<void> {
     if (!cat) { res.status(404).json({ message: 'Category not found.' }); return; }
     res.json({ category: cat });
   } catch (err) {
-    logger.error(`[support] getCategory failed: ${(err as Error).message}`);
+    supportLog.error(`[support] getCategory failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load category.' });
   }
 }
@@ -131,7 +131,7 @@ export async function createCategory(req: Request, res: Response): Promise<void>
       res.status(409).json({ message: 'A category with this issueType already exists.' });
       return;
     }
-    logger.error(`[support] createCategory failed: ${e.message}`);
+    supportLog.error(`[support] createCategory failed: ${e.message}`);
     res.status(500).json({ message: 'Failed to create category.' });
   }
 }
@@ -178,7 +178,7 @@ export async function updateCategory(req: Request, res: Response): Promise<void>
     if (!cat) { res.status(404).json({ message: 'Category not found.' }); return; }
     res.json({ category: cat });
   } catch (err) {
-    logger.error(`[support] updateCategory failed: ${(err as Error).message}`);
+    supportLog.error(`[support] updateCategory failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to update category.' });
   }
 }
@@ -194,7 +194,7 @@ export async function deleteCategory(req: Request, res: Response): Promise<void>
     if (!cat) { res.status(404).json({ message: 'Category not found.' }); return; }
     res.json({ deleted: true });
   } catch (err) {
-    logger.error(`[support] deleteCategory failed: ${(err as Error).message}`);
+    supportLog.error(`[support] deleteCategory failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to delete category.' });
   }
 }
@@ -261,7 +261,7 @@ export async function addField(req: Request, res: Response): Promise<void> {
     ).lean();
     res.status(201).json({ category: updated });
   } catch (err) {
-    logger.error(`[support] addField failed: ${(err as Error).message}`);
+    supportLog.error(`[support] addField failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to add field.' });
   }
 }
@@ -304,7 +304,7 @@ export async function updateField(req: Request, res: Response): Promise<void> {
     if (!cat) { res.status(404).json({ message: 'Field not found.' }); return; }
     res.json({ category: cat });
   } catch (err) {
-    logger.error(`[support] updateField failed: ${(err as Error).message}`);
+    supportLog.error(`[support] updateField failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to update field.' });
   }
 }
@@ -324,7 +324,7 @@ export async function archiveField(req: Request, res: Response): Promise<void> {
     if (!cat) { res.status(404).json({ message: 'Field not found.' }); return; }
     res.json({ category: cat });
   } catch (err) {
-    logger.error(`[support] archiveField failed: ${(err as Error).message}`);
+    supportLog.error(`[support] archiveField failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to archive field.' });
   }
 }

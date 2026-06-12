@@ -17,7 +17,7 @@ import { buildZoomAuthUrl, exchangeCodeForTokens, getZoomUserId, verifyOAuthStat
 import { encrypt } from '../utils/auth/crypto.js';
 import { zoomOAuthCircuit, CircuitOpenError } from '../utils/http/circuitBreaker.js';
 import { sanitizeBase64, sanitizeText } from '../utils/http/sanitize.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 
 // ─── Connect ────────────────────────────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ export function connectZoom(req: Request, res: Response): void {
     headers: req.headers as Record<string, string | string[] | undefined>,
     protocol: req.protocol,
   });
-  logger.info(`[Zoom OAuth] User ${userId} initiated Zoom connect`);
+  adminLog.info(`[Zoom OAuth] User ${userId} initiated Zoom connect`);
   res.json({ authUrl });
 }
 
@@ -55,7 +55,7 @@ export async function callbackZoom(req: Request, res: Response): Promise<void> {
 
   // Handle user denial or error
   if (error) {
-    logger.warn(`[Zoom OAuth] User denied or error: ${error}`);
+    adminLog.warn(`[Zoom OAuth] User denied or error: ${error}`);
     // Redirect back to frontend with error
     res.redirect(`${process.env.CLIENT_URL ?? 'http://localhost:5173'}/account?zoom_error=${encodeURIComponent(error)}`);
     return;
@@ -72,7 +72,7 @@ export async function callbackZoom(req: Request, res: Response): Promise<void> {
   // signature + expiry + userId shape before trusting the userId in the state.
   const userId = verifyOAuthState(state);
   if (!userId) {
-    logger.warn(`[Zoom OAuth] Invalid or expired state from callback (state=${state.slice(0, 20)}...)`);
+    adminLog.warn(`[Zoom OAuth] Invalid or expired state from callback (state=${state.slice(0, 20)}...)`);
     res.redirect(`${process.env.CLIENT_URL ?? 'http://localhost:5173'}/account?zoom_error=${encodeURIComponent('Invalid or expired authentication state. Please try again.')}`);
     return;
   }
@@ -81,7 +81,7 @@ export async function callbackZoom(req: Request, res: Response): Promise<void> {
     // Verify user role
     const user = await User.findById(userId);
     if (!user || user.role !== 'admin') {
-      logger.warn(`[Zoom OAuth] Non-admin user ${userId} attempted Zoom callback`);
+      adminLog.warn(`[Zoom OAuth] Non-admin user ${userId} attempted Zoom callback`);
       res.redirect(`${process.env.CLIENT_URL ?? 'http://localhost:5173'}/account?zoom_error=${encodeURIComponent('Access denied. Only admins can connect Zoom.')}`);
       return;
     }
@@ -92,7 +92,7 @@ export async function callbackZoom(req: Request, res: Response): Promise<void> {
       tokens = await exchangeCodeForTokens(code);
     } catch (err) {
       if (err instanceof CircuitOpenError) {
-        logger.warn(`[Zoom OAuth] Circuit breaker open for token exchange`);
+        adminLog.warn(`[Zoom OAuth] Circuit breaker open for token exchange`);
         res.redirect(`${process.env.CLIENT_URL ?? 'http://localhost:5173'}/account?zoom_error=${encodeURIComponent('Zoom OAuth temporarily unavailable. Please try again shortly.')}`);
         return;
       }
@@ -105,7 +105,7 @@ export async function callbackZoom(req: Request, res: Response): Promise<void> {
     try {
       zoomUserId = await getZoomUserId(tokens.access_token);
     } catch (userErr) {
-      logger.warn(`[Zoom OAuth] Could not fetch Zoom user ID — will be resolved on first webhook: ${userErr instanceof Error ? userErr.message : userErr}`);
+      adminLog.warn(`[Zoom OAuth] Could not fetch Zoom user ID — will be resolved on first webhook: ${userErr instanceof Error ? userErr.message : userErr}`);
     }
 
     // Encrypt tokens before storing at rest
@@ -122,13 +122,13 @@ export async function callbackZoom(req: Request, res: Response): Promise<void> {
       zoomConnectedAt:   new Date(),
     }, { new: true });
 
-    logger.info(`[Zoom OAuth] User ${userId} connected — updated doc: zoomConnected=${updated?.zoomConnected}, zoomUserId=${updated?.zoomUserId}`);
+    adminLog.info(`[Zoom OAuth] User ${userId} connected — updated doc: zoomConnected=${updated?.zoomConnected}, zoomUserId=${updated?.zoomUserId}`);
 
     // Non-blocking backfill: pull past recordings so nothing is missed
     if (updated?.zoomConnected) {
       const { backfillPastMeetings } = await import('./zoomController.js');
       backfillPastMeetings(userId, zoomUserId ?? '').catch((err) =>
-        logger.warn(`[Zoom OAuth] Backfill failed for user ${userId}: ${err instanceof Error ? err.message : err}`)
+        adminLog.warn(`[Zoom OAuth] Backfill failed for user ${userId}: ${err instanceof Error ? err.message : err}`)
       );
     }
 
@@ -136,7 +136,7 @@ export async function callbackZoom(req: Request, res: Response): Promise<void> {
     res.redirect(`${process.env.CLIENT_URL ?? 'http://localhost:5173'}/account?zoom_connected=1`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'OAuth callback failed';
-    logger.error(`[Zoom OAuth] Callback error for user ${userId}: ${msg}`);
+    adminLog.error(`[Zoom OAuth] Callback error for user ${userId}: ${msg}`);
     res.redirect(`${process.env.CLIENT_URL ?? 'http://localhost:5173'}/account?zoom_error=${encodeURIComponent(msg)}`);
   }
 }
@@ -163,7 +163,7 @@ export async function disconnectZoom(req: Request, res: Response): Promise<void>
         zoomConnectedAt:  null,
       });
 
-  logger.info(`[Zoom OAuth] User ${userId} disconnected Zoom`);
+  adminLog.info(`[Zoom OAuth] User ${userId} disconnected Zoom`);
   res.json({ message: 'Zoom account disconnected' });
 }
 
@@ -183,7 +183,7 @@ export async function zoomStatus(req: Request, res: Response): Promise<void> {
   }
 
   const user = await User.findById(userId).select('zoomConnected zoomConnectedAt zoomUserId zoomAccessToken');
-  logger.info(`[Zoom OAuth] zoomStatus for userId=${userId}: zoomConnected=${user?.zoomConnected}, hasEncryptedToken=${!!user?.zoomAccessToken}`);
+  adminLog.info(`[Zoom OAuth] zoomStatus for userId=${userId}: zoomConnected=${user?.zoomConnected}, hasEncryptedToken=${!!user?.zoomAccessToken}`);
 
   const hasCredentials = !!(process.env.ZOOM_CLIENT_ID && process.env.ZOOM_CLIENT_SECRET);
 
@@ -273,7 +273,7 @@ export async function adminBackfill(req: Request, res: Response): Promise<void> 
         sourceType: 'zoom',
       });
       processTranscriptForUser(inserted, target).catch((err: any) =>
-        logger.error(`[Admin Backfill] Failed meeting ${meeting.id}: ${err.message}`)
+        adminLog.error(`[Admin Backfill] Failed meeting ${meeting.id}: ${err.message}`)
       );
       queued++;
     }
@@ -283,7 +283,7 @@ export async function adminBackfill(req: Request, res: Response): Promise<void> 
 
   const { backfillPastMeetings } = await import('./zoomController.js');
   backfillPastMeetings(target, targetUser.zoomUserId ?? '').catch((err) =>
-    logger.warn(`[Admin Backfill] Failed for user ${target}: ${err instanceof Error ? err.message : err}`)
+    adminLog.warn(`[Admin Backfill] Failed for user ${target}: ${err instanceof Error ? err.message : err}`)
   );
   res.json({ message: 'Backfill started in background', targetUserId: target });
 }

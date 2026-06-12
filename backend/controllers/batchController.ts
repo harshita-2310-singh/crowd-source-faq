@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import Batch from '../models/Batch.js';
 import FAQ from '../models/FAQ.js';
-import { logger } from '../utils/http/logger.js';
+import { httpLog } from '../utils/http/logger.js';
 import { z } from 'zod';
 import { invalidatePublicCaches } from './publicFaqController.js';
 
@@ -57,7 +57,7 @@ export async function listPublicBatches(_req: Request, res: Response): Promise<v
       })),
     });
   } catch (err) {
-    logger.error(`[batch] listPublicBatches failed: ${(err as Error).message}`);
+    httpLog.error(`[batch] listPublicBatches failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load batches.' });
   }
 }
@@ -96,7 +96,7 @@ export async function listAdminBatches(_req: Request, res: Response): Promise<vo
     ]);
     res.json({ batches });
   } catch (err) {
-    logger.error(`[batch] listAdminBatches failed: ${(err as Error).message}`);
+    httpLog.error(`[batch] listAdminBatches failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load batches.' });
   }
 }
@@ -119,7 +119,7 @@ export async function getBatch(req: Request, res: Response): Promise<void> {
     const faqCount = await FAQ.countDocuments({ batchId: id, status: 'approved' });
     res.json({ ...batch, faqCount });
   } catch (err) {
-    logger.error(`[batch] getBatch failed: ${(err as Error).message}`);
+    httpLog.error(`[batch] getBatch failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load batch.' });
   }
 }
@@ -153,7 +153,7 @@ export async function createBatch(req: Request, res: Response): Promise<void> {
       res.status(409).json({ message: 'A batch with this name already exists.' });
       return;
     }
-    logger.error(`[batch] createBatch failed: ${e.message}`);
+    httpLog.error(`[batch] createBatch failed: ${e.message}`);
     res.status(500).json({ message: 'Failed to create batch.' });
   }
 }
@@ -198,7 +198,7 @@ export async function updateBatch(req: Request, res: Response): Promise<void> {
       res.status(409).json({ message: 'A batch with this name already exists.' });
       return;
     }
-    logger.error(`[batch] updateBatch failed: ${e.message}`);
+    httpLog.error(`[batch] updateBatch failed: ${e.message}`);
     res.status(500).json({ message: 'Failed to update batch.' });
   }
 }
@@ -221,7 +221,7 @@ export async function archiveBatch(req: Request, res: Response): Promise<void> {
     invalidatePublicCaches();
     res.json(updated);
   } catch (err) {
-    logger.error(`[batch] archiveBatch failed: ${(err as Error).message}`);
+    httpLog.error(`[batch] archiveBatch failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to archive batch.' });
   }
 }
@@ -242,7 +242,7 @@ export async function deleteBatch(req: Request, res: Response): Promise<void> {
     invalidatePublicCaches();
     res.json({ deleted: true, cascadedFaqs: faqCount });
   } catch (err) {
-    logger.error(`[batch] deleteBatch failed: ${(err as Error).message}`);
+    httpLog.error(`[batch] deleteBatch failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to delete batch.' });
   }
 }

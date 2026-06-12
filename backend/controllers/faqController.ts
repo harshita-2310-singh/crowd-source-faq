@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import mongoose, { Types } from 'mongoose';
 import FAQ, { type IFAQ } from '../models/FAQ.js';
 import { generateEmbedding } from '../utils/ai/embeddings.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 import { invalidateCache } from '../utils/http/cache.js';
 import { createTeaDropsForFAQ } from './teaNotificationController.js';
 import FreshReviewVote from '../models/FreshReviewVote.js';
@@ -22,7 +22,7 @@ async function logFreshEvent(
   try {
     await FreshReviewLog.create({ event, faqId, metadata });
   } catch (e) {
-    logger.warn(`FreshReviewLog failed: ${(e as Error).message}`);
+    adminLog.warn(`FreshReviewLog failed: ${(e as Error).message}`);
   }
 }
 
@@ -350,7 +350,7 @@ export const createFAQ = async (req: Request, res: Response): Promise<void> => {
     invalidatePublicCaches();
 
     // Fan out tea drops to all non-admin users
-    createTeaDropsForFAQ(faq._id.toString(), question).catch((err) => logger.warn(`[faq] createTeaDropsForFAQ failed: ${(err as Error).message}`));
+    createTeaDropsForFAQ(faq._id.toString(), question).catch((err) => adminLog.warn(`[faq] createTeaDropsForFAQ failed: ${(err as Error).message}`));
 
     res.status(201).json({ message: 'FAQ created successfully.', faq });
   } catch (error) {
@@ -506,7 +506,7 @@ export const checkFAQMatch = async (req: Request<{}, {}, CheckFAQMatchBody>, res
       } : null,
     });
   } catch (error) {
-    logger.error('FAQ match check error', { error: error instanceof Error ? error.message : String(error) });
+    adminLog.error('FAQ match check error', { error: error instanceof Error ? error.message : String(error) });
     res.status(500).json({ message: 'Server error', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
   }
 };
@@ -543,7 +543,7 @@ export const submitFeedback = async (req: Request<{ id: string }, {}, { helpful:
         updated.tier = calculateTier(updated.points);
         await updated.save();
         autoAwardBadges(faq.createdBy.toString()).catch((err) => {
-          logger.warn(`[faq] Failed to auto-award badges to ${faq.createdBy}: ${(err as Error).message}`);
+          adminLog.warn(`[faq] Failed to auto-award badges to ${faq.createdBy}: ${(err as Error).message}`);
         });
         await ReputationLog.create({
           userId: faq.createdBy,

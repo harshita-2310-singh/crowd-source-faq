@@ -166,6 +166,14 @@ export interface Logger {
   warn:  (message: string, meta?: object) => void;
   error: (message: string, meta?: object) => void;
   alert: (message: string, meta?: object) => void;
+  /**
+   * Security audit — writes at ALERT level (forwarded to Discord)
+   * and tags the log line with [AUDIT]. Available on every named
+   * logger so the call site reads e.g. `adminLog.audit('banned
+   * user', { userId })` instead of having to import the bare
+   * `logger.audit`.
+   */
+  audit: (action: string, meta?: Record<string, unknown>) => void;
   /** With requestId (from AsyncLocalStorage context) */
   child: (requestId: string) => Logger;
 }
@@ -179,13 +187,23 @@ export interface Logger {
  *   log.alert('banned login attempt', { email, ip });
  */
 export function createLogger(category: string): Logger {
-  const make = (requestId?: string): Logger => ({
-    info:  (message, meta) => emit({ level: 'info',  category, message, meta, requestId }),
-    warn:  (message, meta) => emit({ level: 'warn',  category, message, meta, requestId }),
-    error: (message, meta) => emit({ level: 'error', category, message, meta, requestId }),
-    alert: (message, meta) => emit({ level: 'alert', category, message, meta, requestId }),
-    child: (rid: string) => make(rid),
-  });
+  const make = (requestId?: string): Logger => {
+    const o: Logger = {
+      info:  (message, meta) => emit({ level: 'info',  category, message, meta, requestId }),
+      warn:  (message, meta) => emit({ level: 'warn',  category, message, meta, requestId }),
+      error: (message, meta) => emit({ level: 'error', category, message, meta, requestId }),
+      alert: (message, meta) => emit({ level: 'alert', category, message, meta, requestId }),
+      audit: (action, meta) => emit({
+        level: 'alert',
+        category,
+        message: `[AUDIT] ${action}`,
+        meta: { action, timestamp: new Date().toISOString(), ...meta },
+        requestId,
+      }),
+      child: (rid: string) => make(rid),
+    };
+    return o;
+  };
   return make();
 }
 

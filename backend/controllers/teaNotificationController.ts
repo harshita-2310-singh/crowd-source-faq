@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import TeaNotification, { type TeaEventType } from '../models/TeaNotification.js';
-import { logger } from '../utils/http/logger.js';
+import { supportLog } from '../utils/http/logger.js';
 
 // ─── Reusable tea-drop creator ────────────────────────────────────────────────
 // eventType drives the icon/message shown in the SpillTheTea UI.
@@ -29,7 +29,7 @@ export async function createTeaDrop(params: {
       { upsert: true, setDefaultsOnInsert: true }
     );
   } catch (err) {
-    logger.warn(`[tea] createTeaDrop failed: ${(err as Error).message}`);
+    supportLog.warn(`[tea] createTeaDrop failed: ${(err as Error).message}`);
   }
 }
 
@@ -50,7 +50,7 @@ export async function createTeaDropsForFAQ(faqId: string, faqQuestion: string): 
       )
     );
   } catch (err) {
-    logger.warn(`[tea] createTeaDropsForFAQ failed: ${(err as Error).message}`);
+    supportLog.warn(`[tea] createTeaDropsForFAQ failed: ${(err as Error).message}`);
   }
 }
 

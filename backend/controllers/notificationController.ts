@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import Notification from '../models/Notification.js';
-import { logger } from '../utils/http/logger.js';
+import { communityLog } from '../utils/http/logger.js';
 
 export interface CreateNotificationParams {
   recipient: import('mongoose').Types.ObjectId;
@@ -17,7 +17,7 @@ export const createNotification = async (params: CreateNotificationParams): Prom
     await Notification.create(params);
   } catch (err) {
     // Non-critical — log but don't break the parent operation
-    logger.warn(`[notification] Failed to create notification: ${(err as Error).message}`);
+    communityLog.warn(`[notification] Failed to create notification: ${(err as Error).message}`);
   }
 };
 

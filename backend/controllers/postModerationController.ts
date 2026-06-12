@@ -15,7 +15,7 @@ import { Types } from 'mongoose';
 import CommunityPost from '../models/CommunityPost.js';
 import User, { calculateTier } from '../models/User.js';
 import ReputationLog from '../models/ReputationLog.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 
 // POST /api/community/:id/object-to-promotion — Moderator blocks promotion of a post
 export const objectToPromotion = async (req: Request, res: Response): Promise<void> => {
@@ -36,7 +36,7 @@ export const objectToPromotion = async (req: Request, res: Response): Promise<vo
 
     res.json({ message: 'Promotion objected. Post removed from promotion queue.' });
   } catch (error) {
-    logger.error(`[post] objectToPromotion failed: ${(error as Error).message}`);
+    adminLog.error(`[post] objectToPromotion failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -87,7 +87,7 @@ export const confirmSpam = async (req: Request, res: Response): Promise<void> =>
 
     res.json({ message: 'Spam confirmed. -20 points deducted from author.' });
   } catch (error) {
-    logger.error(`[post] confirmSpam failed: ${(error as Error).message}`);
+    adminLog.error(`[post] confirmSpam failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -113,7 +113,7 @@ export const hidePost = async (req: Request, res: Response): Promise<void> => {
     await post.save();
     res.json({ message: 'Post hidden.' });
   } catch (error) {
-    logger.error(`[post] hidePost failed: ${(error as Error).message}`);
+    adminLog.error(`[post] hidePost failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -131,7 +131,7 @@ export const unhidePost = async (req: Request, res: Response): Promise<void> => 
     await post.save();
     res.json({ message: 'Post unhidden.' });
   } catch (error) {
-    logger.error(`[post] unhidePost failed: ${(error as Error).message}`);
+    adminLog.error(`[post] unhidePost failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -156,7 +156,7 @@ export const lockPost = async (req: Request, res: Response): Promise<void> => {
     await post.save();
     res.json({ message: 'Post locked.' });
   } catch (error) {
-    logger.error(`[post] lockPost failed: ${(error as Error).message}`);
+    adminLog.error(`[post] lockPost failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -174,7 +174,7 @@ export const unlockPost = async (req: Request, res: Response): Promise<void> => 
     await post.save();
     res.json({ message: 'Post unlocked.' });
   } catch (error) {
-    logger.error(`[post] unlockPost failed: ${(error as Error).message}`);
+    adminLog.error(`[post] unlockPost failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -17,7 +17,7 @@ import User, { calculateTier } from '../models/User.js';
 import ReputationLog from '../models/ReputationLog.js';
 import { autoAwardBadges } from './reputationController.js';
 import { createTeaDrop } from './teaNotificationController.js';
-import { logger } from '../utils/http/logger.js';
+import { communityLog } from '../utils/http/logger.js';
 
 // ─── toggleCommentUpvote ───────────────────────────────────────────────────────
 // POST /api/community/:id/comments/:commentId/upvote
@@ -74,7 +74,7 @@ export const toggleCommentUpvote = async (req: Request, res: Response): Promise<
         triggeredBy: req.user!._id,
         triggeredByName: req.user!.name,
       }).catch((err) => {
-        logger.warn(`[commentVote] Failed to create tea drop for comment author ${commentAuthorId}: ${(err as Error).message}`);
+        communityLog.warn(`[commentVote] Failed to create tea drop for comment author ${commentAuthorId}: ${(err as Error).message}`);
       });
 
       // Award +5 points to comment author for receiving answer upvote.
@@ -98,7 +98,7 @@ export const toggleCommentUpvote = async (req: Request, res: Response): Promise<
           { $set: { tier: newTier } },
         );
         autoAwardBadges(commentAuthorId.toString()).catch((err) => {
-          logger.warn(`[commentVote] Failed to auto-award badges to ${commentAuthorId}: ${(err as Error).message}`);
+          communityLog.warn(`[commentVote] Failed to auto-award badges to ${commentAuthorId}: ${(err as Error).message}`);
         });
         await ReputationLog.create({
           userId: commentAuthorId,

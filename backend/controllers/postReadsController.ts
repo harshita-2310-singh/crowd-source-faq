@@ -10,7 +10,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import CommunityPost from '../models/CommunityPost.js';
-import { logger } from '../utils/http/logger.js';
+import { communityLog } from '../utils/http/logger.js';
 import { buildCommentTree, timeTrialHoursRemaining } from './postCore.js';
 
 // GET /api/community — All posts (cursor-paginated, filterable, sortable, searchable)
@@ -125,7 +125,7 @@ export const getAllPosts = async (req: Request, res: Response): Promise<void> =>
       nextCursor,
     });
   } catch (error) {
-    logger.error(`[post] getAllPosts failed: ${(error as Error).message}`);
+    communityLog.error(`[post] getAllPosts failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -157,7 +157,7 @@ export const getPostById = async (req: Request, res: Response): Promise<void> =>
 
     res.json(postObj);
   } catch (error) {
-    logger.error(`[post] getPostById failed: ${(error as Error).message}`);
+    communityLog.error(`[post] getPostById failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -181,7 +181,7 @@ export const getSolvedPosts = async (req: Request, res: Response): Promise<void>
 
     res.json({ posts });
   } catch (error) {
-    logger.error(`[post] getSolvedPosts failed: ${(error as Error).message}`);
+    communityLog.error(`[post] getSolvedPosts failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };

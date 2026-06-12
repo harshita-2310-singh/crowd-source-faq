@@ -23,7 +23,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import CommunityPost from '../models/CommunityPost.js';
 import FAQ from '../models/FAQ.js';
-import { logger } from '../utils/http/logger.js';
+import { cronLog } from '../utils/http/logger.js';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -59,15 +59,15 @@ interface ParsedReview {
  */
 export async function runCommunityPromotionReview(postId: string): Promise<AIReviewResult | null> {
   const post = await CommunityPost.findById(postId);
-  if (!post) { logger.warn(`[aiReview] Post ${postId} not found`); return null; }
+  if (!post) { cronLog.warn(`[aiReview] Post ${postId} not found`); return null; }
 
   const lc = post.lifecycle?.status ?? 'open';
   if (lc !== 'community_accepted') {
-    logger.info(`[aiReview] Post ${postId} not in community_accepted state (${lc}), skipping`);
+    cronLog.info(`[aiReview] Post ${postId} not in community_accepted state (${lc}), skipping`);
     return null;
   }
   if (post.lifecycle?.aiGeneratedFaq?.question) {
-    logger.info(`[aiReview] Post ${postId} already has AI output, skipping`);
+    cronLog.info(`[aiReview] Post ${postId} already has AI output, skipping`);
     return post.lifecycle.aiGeneratedFaq as unknown as AIReviewResult;
   }
 
@@ -191,7 +191,7 @@ RULES:
 
     await post.save();
 
-    logger.info(`[aiReview] Post ${postId} AI review complete. confidence=${Math.round(result.confidence * 100)}%, duplicate=${!!duplicateOf}`);
+    cronLog.info(`[aiReview] Post ${postId} AI review complete. confidence=${Math.round(result.confidence * 100)}%, duplicate=${!!duplicateOf}`);
 
     return {
       question: result.refinedQuestion,
@@ -204,7 +204,7 @@ RULES:
       grammarIssues: result.grammarIssues,
     };
   } catch (err) {
-    logger.error(`[aiReview] Post ${postId} failed: ${(err as Error).message}`);
+    cronLog.error(`[aiReview] Post ${postId} failed: ${(err as Error).message}`);
     return null;
   }
 }
@@ -287,7 +287,7 @@ function parseCommunityReviewResponse(
       duplicateOfId: dupId,
     };
   } catch (err) {
-    logger.warn(`[aiPromotion] Failed to parse community review JSON response: ${(err as Error).message}. Raw response: ${raw.slice(0, 300)}`);
+    cronLog.warn(`[aiPromotion] Failed to parse community review JSON response: ${(err as Error).message}. Raw response: ${raw.slice(0, 300)}`);
     return defaultReview();
   }
 }

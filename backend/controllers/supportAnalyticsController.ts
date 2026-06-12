@@ -13,7 +13,7 @@ import SupportRequest, {
   type SupportStatus,
 } from '../models/SupportRequest.js';
 import { ISSUE_CONFIGS } from '../models/SupportRequest.js';
-import { logger } from '../utils/http/logger.js';
+import { supportLog } from '../utils/http/logger.js';
 import { VALID_STATUSES } from './supportCore.js';
 
 interface StatusCount { _id: SupportStatus; count: number }
@@ -92,7 +92,7 @@ export async function getSupportAnalytics(_req: Request, res: Response): Promise
       recent,
     });
   } catch (err) {
-    logger.error(`[support] getSupportAnalytics failed: ${(err as Error).message}`);
+    supportLog.error(`[support] getSupportAnalytics failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load support analytics.' });
   }
 }

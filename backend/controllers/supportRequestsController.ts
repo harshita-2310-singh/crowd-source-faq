@@ -20,7 +20,7 @@ import SupportRequest, {
   type ISupportFollowUp,
 } from '../models/SupportRequest.js';
 import SupportCategory, { type IContextField } from '../models/SupportCategory.js';
-import { logger } from '../utils/http/logger.js';
+import { supportLog } from '../utils/http/logger.js';
 import { assertCanCreateContent } from '../utils/banUtils.js';
 import {
   VALID_STATUSES,
@@ -86,7 +86,7 @@ export async function getTroubleshootSteps(req: Request, res: Response): Promise
       fields: (cat?.fields ?? []).filter((f) => !f.archived),
     });
   } catch (err) {
-    logger.error(`[support] getTroubleshootSteps failed: ${(err as Error).message}`);
+    supportLog.error(`[support] getTroubleshootSteps failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load troubleshooting steps.' });
   }
 }
@@ -349,7 +349,7 @@ export async function createSupportRequest(req: Request, res: Response): Promise
 
     res.status(201).json({ request: stripAdminOnlyFields(request.toObject(), false) });
   } catch (err) {
-    logger.error(`[support] createSupportRequest failed: ${(err as Error).message}`);
+    supportLog.error(`[support] createSupportRequest failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to submit support request.' });
   }
 }
@@ -488,7 +488,7 @@ export async function listSupportRequests(req: Request, res: Response): Promise<
       })),
     });
   } catch (err) {
-    logger.error(`[support] listSupportRequests failed: ${(err as Error).message}`);
+    supportLog.error(`[support] listSupportRequests failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load support requests.' });
   }
 }
@@ -525,7 +525,7 @@ export async function getSupportRequest(req: Request, res: Response): Promise<vo
     }
     res.json({ request: stripAdminOnlyFields(request, isAdmin) });
   } catch (err) {
-    logger.error(`[support] getSupportRequest failed: ${(err as Error).message}`);
+    supportLog.error(`[support] getSupportRequest failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load support request.' });
   }
 }
@@ -608,7 +608,7 @@ export async function selfDeleteSupportRequest(req: Request, res: Response): Pro
           request._id,
         );
       } catch (refundErr) {
-        logger.warn(`[support] self-delete refund failed: ${(refundErr as Error).message}`);
+        supportLog.warn(`[support] self-delete refund failed: ${(refundErr as Error).message}`);
       }
     }
 
@@ -631,12 +631,12 @@ export async function selfDeleteSupportRequest(req: Request, res: Response): Pro
         },
       });
     } catch (notifyErr) {
-      logger.warn(`[support] self-delete admin notify failed: ${(notifyErr as Error).message}`);
+      supportLog.warn(`[support] self-delete admin notify failed: ${(notifyErr as Error).message}`);
     }
 
     res.json({ deleted: true, refundedSp: request.isGolden ? request.spCost : 0 });
   } catch (err) {
-    logger.error(`[support] selfDeleteSupportRequest failed: ${(err as Error).message}`);
+    supportLog.error(`[support] selfDeleteSupportRequest failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to self-delete support request.' });
   }
 }

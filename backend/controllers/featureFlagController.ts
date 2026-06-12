@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import FeatureFlag from '../models/FeatureFlag.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 import { z } from 'zod';
 
 // Known flag keys — the canonical list. Anything else posted to the
@@ -68,7 +68,7 @@ export async function listFeatureFlags(_req: Request, res: Response): Promise<vo
     const flags = await FeatureFlag.find({}).select('-__v').lean();
     res.json({ flags });
   } catch (err) {
-    logger.error(`[featureFlags] listFeatureFlags failed: ${(err as Error).message}`);
+    adminLog.error(`[featureFlags] listFeatureFlags failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load feature flags.' });
   }
 }
@@ -137,10 +137,10 @@ export async function toggleFeatureFlag(req: Request, res: Response): Promise<vo
       { new: true },
     ).lean();
     invalidateFeatureFlagCache(key);
-    logger.info(`[featureFlags] ${key} → ${isEnabling ? 'enabled' : 'disabled'}`);
+    adminLog.info(`[featureFlags] ${key} → ${isEnabling ? 'enabled' : 'disabled'}`);
     res.json({ flag: updated });
   } catch (err) {
-    logger.error(`[featureFlags] toggleFeatureFlag failed: ${(err as Error).message}`);
+    adminLog.error(`[featureFlags] toggleFeatureFlag failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to update feature flag.' });
   }
 }

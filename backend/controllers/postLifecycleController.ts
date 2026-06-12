@@ -20,7 +20,7 @@ import { invalidateCache } from '../utils/http/cache.js';
 import { dispatchNotification } from '../utils/http/notificationDispatcher.js';
 import { createTeaDrop } from './teaNotificationController.js';
 import { sanitizeHtml } from '../utils/http/sanitize.js';
-import { logger } from '../utils/http/logger.js';
+import { communityLog } from '../utils/http/logger.js';
 
 // POST /api/community/:id/resolve — Mark a community post as resolved (admin/mod only)
 // When resolved, the post author is notified via the notification system
@@ -66,7 +66,7 @@ export const resolvePost = async (req: Request, res: Response): Promise<void> =>
 
     // Invalidate search cache so resolved answer reflects immediately
     await invalidateCache().catch((err) => {
-      logger.warn(`[post] Failed to invalidate cache on post resolve: ${(err as Error).message}`);
+      communityLog.warn(`[post] Failed to invalidate cache on post resolve: ${(err as Error).message}`);
     });
 
     // ── Check if post is now eligible for FAQ promotion ───────────────────────
@@ -75,10 +75,10 @@ export const resolvePost = async (req: Request, res: Response): Promise<void> =>
       const eligible = await checkPromotionEligibility(post);
       if (eligible) {
         await startPromotionReview(post, req.user!._id.toString());
-        logger.info(`Resolved post ${post._id} entered promotion review`, { postId: post._id.toString() });
+        communityLog.info(`Resolved post ${post._id} entered promotion review`, { postId: post._id.toString() });
       }
     } catch (e) {
-      logger.warn(`Promotion eligibility check failed for post ${post._id}: ${(e as Error).message}`);
+      communityLog.warn(`Promotion eligibility check failed for post ${post._id}: ${(e as Error).message}`);
     }
 
     // ── Notify post author ────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ export const resolvePost = async (req: Request, res: Response): Promise<void> =>
       link: `/community?post=${post._id}`,
       title: 'Your question was resolved!',
     }).catch((err) => {
-      logger.warn(`[post] Failed to dispatch post resolved notification: ${(err as Error).message}`);
+      communityLog.warn(`[post] Failed to dispatch post resolved notification: ${(err as Error).message}`);
     });
 
     // ── Tea drop: "your post was answered" ───────────────────────────────────
@@ -103,13 +103,13 @@ export const resolvePost = async (req: Request, res: Response): Promise<void> =>
         triggeredByName: req.user!.name,
         content: answer.trim().slice(0, 200),
       }).catch((err) => {
-        logger.warn(`[post] Failed to create tea drop for post answer: ${(err as Error).message}`);
+        communityLog.warn(`[post] Failed to create tea drop for post answer: ${(err as Error).message}`);
       });
     }
 
     res.json({ message: 'Post resolved.', post });
   } catch (error) {
-    logger.error(`[post] resolvePost failed: ${(error as Error).message}`);
+    communityLog.error(`[post] resolvePost failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -145,7 +145,7 @@ export const requestExpertHelp = async (req: Request, res: Response): Promise<vo
           link: `/community?post=${post._id}`,
         })
       ).catch((err) => {
-        logger.warn(`[post] Failed to notify mod/admin ${mod._id} on expert request: ${(err as Error).message}`);
+        communityLog.warn(`[post] Failed to notify mod/admin ${mod._id} on expert request: ${(err as Error).message}`);
       })
     );
 
@@ -153,7 +153,7 @@ export const requestExpertHelp = async (req: Request, res: Response): Promise<vo
 
     res.json({ message: 'Expert help requested. Moderators have been notified.' });
   } catch (error) {
-    logger.error(`[post] requestExpertHelp failed: ${(error as Error).message}`);
+    communityLog.error(`[post] requestExpertHelp failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -178,7 +178,7 @@ export const convertCommunityPostToFAQ = async (req: Request, res: Response): Pr
     try {
       embedding = await generateEmbedding(`Question: ${post.title}. Answer: ${post.answer}`);
     } catch (err) {
-      logger.warn(`Failed to generate embedding for FAQ: ${(err as Error).message}`);
+      communityLog.warn(`Failed to generate embedding for FAQ: ${(err as Error).message}`);
     }
 
     // Create the FAQ from the post's title (question) and answer
@@ -202,12 +202,12 @@ export const convertCommunityPostToFAQ = async (req: Request, res: Response): Pr
 
     // Invalidate search cache so the new FAQ appears immediately
     await invalidateCache().catch((err) => {
-      logger.warn(`[post] Failed to invalidate cache on FAQ conversion: ${(err as Error).message}`);
+      communityLog.warn(`[post] Failed to invalidate cache on FAQ conversion: ${(err as Error).message}`);
     });
 
     res.status(201).json({ message: 'FAQ created from community post.', faq });
   } catch (error) {
-    logger.error(`[post] convertCommunityPostToFAQ failed: ${(error as Error).message}`);
+    communityLog.error(`[post] convertCommunityPostToFAQ failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -244,7 +244,7 @@ export const setPostDNA = async (req: Request, res: Response): Promise<void> => 
 
     res.json({ message: 'DNA updated.', dna: post.dna });
   } catch (error) {
-    logger.error(`[post] setPostDNA failed: ${(error as Error).message}`);
+    communityLog.error(`[post] setPostDNA failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -272,7 +272,7 @@ export const setPostTags = async (req: Request, res: Response): Promise<void> =>
 
     res.json({ message: 'Tags updated.', tags: post.tags });
   } catch (error) {
-    logger.error(`[post] setPostTags failed: ${(error as Error).message}`);
+    communityLog.error(`[post] setPostTags failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });
   }
 };

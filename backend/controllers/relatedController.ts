@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import CommunityPost from '../models/CommunityPost.js';
 import FAQ from '../models/FAQ.js';
-import { logger } from '../utils/http/logger.js';
+import { communityLog } from '../utils/http/logger.js';
 
 interface RelatedItem {
   _id: string;
@@ -155,7 +155,7 @@ export async function getRelatedForPost(req: Request, res: Response): Promise<vo
         }
       } catch (e) {
         // Vector index might not exist on the dev DB — degrade gracefully
-        logger.warn(`RelatedFAQ vector/text search failed: ${(e as Error).message}`);
+        communityLog.warn(`RelatedFAQ vector/text search failed: ${(e as Error).message}`);
       }
     }
 

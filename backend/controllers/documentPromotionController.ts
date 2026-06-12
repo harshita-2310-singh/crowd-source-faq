@@ -17,7 +17,7 @@
  */
 
 import DocumentInsight, { type IDocumentInsight } from '../models/DocumentInsight.js';
-import { logger } from '../utils/http/logger.js';
+import { queueLog } from '../utils/http/logger.js';
 import { promoteInsightToFaq } from '../utils/documentPromotion.js';
 
 const THRESHOLD = (() => {
@@ -56,7 +56,7 @@ export async function runPromotePopularDocumentInsights(): Promise<PromotionRunR
     .exec();
 
   result.scanned = candidates.length;
-  logger.info(`[documentPromotion] scanning ${result.scanned} candidate insights (threshold=${THRESHOLD})`);
+  queueLog.info(`[documentPromotion] scanning ${result.scanned} candidate insights (threshold=${THRESHOLD})`);
 
   for (const insight of candidates) {
     try {
@@ -70,7 +70,7 @@ export async function runPromotePopularDocumentInsights(): Promise<PromotionRunR
       const out = await promoteInsightToFaq(fresh, systemUserId, 'auto-popular');
       if (out.faq) {
         result.promoted++;
-        logger.info(
+        queueLog.info(
           `[documentPromotion] promoted insight ${insight._id} → FAQ ${out.faq._id} (matchCount=${fresh.searchMatchCount})`,
         );
       } else {
@@ -78,11 +78,11 @@ export async function runPromotePopularDocumentInsights(): Promise<PromotionRunR
       }
     } catch (err) {
       result.errors++;
-      logger.warn(`[documentPromotion] failed to promote ${insight._id}: ${(err as Error).message}`);
+      queueLog.warn(`[documentPromotion] failed to promote ${insight._id}: ${(err as Error).message}`);
     }
   }
 
-  logger.info(
+  queueLog.info(
     `[documentPromotion] run complete: scanned=${result.scanned} promoted=${result.promoted} skipped=${result.skipped} errors=${result.errors}`,
   );
   return result;

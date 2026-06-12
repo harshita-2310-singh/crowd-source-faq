@@ -16,7 +16,7 @@
 import { Request, Response } from 'express';
 import AttendanceGuidance from '../models/AttendanceGuidance.js';
 import { ISSUE_CONFIGS, type SupportIssueType } from '../models/SupportRequest.js';
-import { logger } from '../utils/http/logger.js';
+import { supportLog } from '../utils/http/logger.js';
 import { getAuthedUserId } from './supportCore.js';
 
 function asStringParam(v: string | string[] | undefined): string | undefined {
@@ -37,7 +37,7 @@ export async function listGuidance(_req: Request, res: Response): Promise<void> 
     }
     res.json(results);
   } catch (err) {
-    logger.error(`[support] listGuidance failed: ${(err as Error).message}`);
+    supportLog.error(`[support] listGuidance failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load guidance.' });
   }
 }
@@ -77,7 +77,7 @@ export async function updateGuidance(req: Request, res: Response): Promise<void>
       guidance: { issueType: key, label: ISSUE_CONFIGS[key as SupportIssueType].label, steps: cleaned },
     });
   } catch (err) {
-    logger.error(`[support] updateGuidance failed: ${(err as Error).message}`);
+    supportLog.error(`[support] updateGuidance failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to update guidance.' });
   }
 }

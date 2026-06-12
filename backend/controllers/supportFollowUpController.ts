@@ -15,7 +15,7 @@ import SupportRequest, {
   type ISupportFollowUp,
   type SupportStatus,
 } from '../models/SupportRequest.js';
-import { logger } from '../utils/http/logger.js';
+import { supportLog } from '../utils/http/logger.js';
 import {
   VALID_STATUSES,
   getAuthedUserId,
@@ -138,7 +138,7 @@ export async function addSupportFollowUp(req: Request, res: Response): Promise<v
 
     res.json({ request: stripAdminOnlyFields(request.toObject(), isAdmin) });
   } catch (err) {
-    logger.error(`[support] addSupportFollowUp failed: ${(err as Error).message}`);
+    supportLog.error(`[support] addSupportFollowUp failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to add follow-up.' });
   }
 }
@@ -317,7 +317,7 @@ export async function updateSupportStatus(req: Request, res: Response): Promise<
 
     res.json({ request: stripAdminOnlyFields(request.toObject(), true) });
   } catch (err) {
-    logger.error(`[support] updateSupportStatus failed: ${(err as Error).message}`);
+    supportLog.error(`[support] updateSupportStatus failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to update support request.' });
   }
 }

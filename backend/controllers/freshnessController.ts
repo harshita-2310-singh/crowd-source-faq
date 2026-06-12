@@ -3,7 +3,7 @@ import { Types } from 'mongoose';
 import FAQ from '../models/FAQ.js';
 import FreshReviewVote from '../models/FreshReviewVote.js';
 import FreshReviewLog, { type FreshReviewEventType } from '../models/FreshReviewLog.js';
-import { logger } from '../utils/http/logger.js';
+import { cronLog } from '../utils/http/logger.js';
 
 // Configurable thresholds from env (with defaults)
 const VERIFY_THRESHOLD = parseInt(process.env['FAQ_VERIFY_THRESHOLD'] || '3');
@@ -25,7 +25,7 @@ async function logEvent(
   try {
     await FreshReviewLog.create({ event, faqId, metadata });
   } catch (e) {
-    logger.warn(`FreshReviewLog failed: ${(e as Error).message}`);
+    cronLog.warn(`FreshReviewLog failed: ${(e as Error).message}`);
   }
 }
 
@@ -362,7 +362,7 @@ export const verifyEscalatedFAQ = async (req: Request<{ id: string }>, res: Resp
         );
       } catch (err) {
         // Non-fatal — log warning and keep old embedding
-        logger.warn(`[freshness] Failed to regenerate FAQ embedding for FAQ ${faq._id}: ${(err as Error).message}`);
+        cronLog.warn(`[freshness] Failed to regenerate FAQ embedding for FAQ ${faq._id}: ${(err as Error).message}`);
       }
     }
 
@@ -443,7 +443,7 @@ export const runFreshnessCheck = async (): Promise<void> => {
     });
 
     if (due.length === 0) {
-      logger.info('[freshness] No FAQs due for review.');
+      cronLog.info('[freshness] No FAQs due for review.');
       return;
     }
 
@@ -460,7 +460,7 @@ export const runFreshnessCheck = async (): Promise<void> => {
         reviewIntervalDays: f.reviewIntervalDays,
         reviewCycle: newCycle,
       });
-      logger.info(`[freshness] Auto-flagged FAQ ${f._id} (tier: ${f.freshnessTier})`);
+      cronLog.info(`[freshness] Auto-flagged FAQ ${f._id} (tier: ${f.freshnessTier})`);
     }
 
     // ── Auto-escalation: pending_review with no votes after ESCALATION_DAYS ───
@@ -483,12 +483,12 @@ export const runFreshnessCheck = async (): Promise<void> => {
           reason: 'inactivity',
           reviewCycle: f.reviewCycle,
         });
-        logger.info(`[freshness] Auto-escalated (inactive) FAQ ${f._id}`);
+        cronLog.info(`[freshness] Auto-escalated (inactive) FAQ ${f._id}`);
       }
     }
 
-    logger.info(`[freshness] Processed ${due.length} stale FAQs, ${inactiveFAQs.length} auto-escalated.`);
+    cronLog.info(`[freshness] Processed ${due.length} stale FAQs, ${inactiveFAQs.length} auto-escalated.`);
   } catch (err) {
-    logger.error(`[freshness] Cron error: ${(err as Error).message}`);
+    cronLog.error(`[freshness] Cron error: ${(err as Error).message}`);
   }
 };

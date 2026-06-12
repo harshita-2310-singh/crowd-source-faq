@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import CommunityPost from '../models/CommunityPost.js';
-import { logger } from '../utils/http/logger.js';
+import { communityLog } from '../utils/http/logger.js';
 
 /** GET /api/community/stats — public community health metrics */
 export async function getCommunityStats(_req: Request, res: Response): Promise<void> {
@@ -40,7 +40,7 @@ export async function getCommunityStats(_req: Request, res: Response): Promise<v
       activeContributors,
     });
   } catch (err) {
-    logger.error(`getCommunityStats: ${(err as Error).message}`);
+    communityLog.error(`getCommunityStats: ${(err as Error).message}`);
     res.status(500).json({ error: 'Failed to load community stats' });
   }
 }

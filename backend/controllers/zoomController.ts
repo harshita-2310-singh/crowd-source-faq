@@ -24,7 +24,7 @@ import { processZoomMeetingForKnowledge } from '../services/knowledgeBase.js';
 import { extractInsightsFromTranscript } from '../utils/zoom/zoomExtractor.js';
 import { CircuitOpenError } from '../utils/http/circuitBreaker.js';
 import { sanitizeText } from '../utils/http/sanitize.js';
-import { logger } from '../utils/http/logger.js';
+import { httpLog } from '../utils/http/logger.js';
 import { getZoomHealth, recordZoomError } from '../utils/zoom/zoomHealth.js';
 import { scheduleRetry, manualRetry } from '../services/retryService.js';
 
@@ -42,10 +42,10 @@ function verifyZoomSignature(req: Request): boolean {
     // let anyone create fake ZoomMeeting records and drain the AI quota.
     // In dev/staging, fall open with a loud log so the developer notices.
     if (process.env['NODE_ENV'] === 'production') {
-      logger.error('[Zoom] ZOOM_WEBHOOK_SECRET_TOKEN missing in production — rejecting webhook');
+      httpLog.error('[Zoom] ZOOM_WEBHOOK_SECRET_TOKEN missing in production — rejecting webhook');
       return false;
     }
-    logger.warn('[Zoom] ZOOM_WEBHOOK_SECRET_TOKEN not set — skipping signature verification (dev only)');
+    httpLog.warn('[Zoom] ZOOM_WEBHOOK_SECRET_TOKEN not set — skipping signature verification (dev only)');
     return true;
   }
   const header = req.headers['x-zm-signature'] as string | undefined;
@@ -84,7 +84,7 @@ async function setProgress(
 
 export async function handleZoomWebhook(req: Request, res: Response): Promise<void> {
   if (!verifyZoomSignature(req)) {
-    logger.warn('[Zoom] Rejected webhook with invalid signature');
+    httpLog.warn('[Zoom] Rejected webhook with invalid signature');
     res.status(403).json({ message: 'Invalid signature' });
     return;
   }
@@ -94,11 +94,11 @@ export async function handleZoomWebhook(req: Request, res: Response): Promise<vo
   const body = req.body as ZoomWebhookPayload;
   const event = body.event;
 
-  logger.info(`[Zoom Webhook] event=${event}`, { zoomEvent: body });
+  httpLog.info(`[Zoom Webhook] event=${event}`, { zoomEvent: body });
 
   if (event === 'recording.transcript_completed' || event === 'recording.completed') {
     processRecordingEvent(body).catch((err) => {
-      logger.error('[Zoom Webhook] Background processing failed', { error: err.message });
+      httpLog.error('[Zoom Webhook] Background processing failed', { error: err.message });
     });
   }
 }
@@ -196,7 +196,7 @@ export async function uploadTranscript(req: Request, res: Response): Promise<voi
       topic: meetingTopic,
     });
   } catch (err) {
-    logger.error('[Zoom] Manual upload processing failed', { error: (err as Error).message, meetingId });
+    httpLog.error('[Zoom] Manual upload processing failed', { error: (err as Error).message, meetingId });
     res.status(500).json({
       message: 'Processing failed: ' + (err as Error).message,
       meetingId: meeting?._id?.toString(),
@@ -220,11 +220,11 @@ export async function backfillPastMeetings(userId: string, zoomUserId: string): 
     const meetings = await getPastRecordings(userId);
 
     if (meetings.length === 0) {
-      logger.info(`[Zoom Backfill] No past recordings found for user ${userId}`);
+      httpLog.info(`[Zoom Backfill] No past recordings found for user ${userId}`);
       return;
     }
 
-    logger.info(`[Zoom Backfill] Found ${meetings.length} past recordings for user ${userId}`);
+    httpLog.info(`[Zoom Backfill] Found ${meetings.length} past recordings for user ${userId}`);
 
     // Deduplicate against already-processed meetings
     const existingIds = new Set(
@@ -260,16 +260,16 @@ export async function backfillPastMeetings(userId: string, zoomUserId: string): 
       });
 
       processTranscriptForUser(meetingRecord, userId).catch((err) => {
-        logger.error(`[Zoom Backfill] Failed to process meeting ${meeting.id}: ${err instanceof Error ? err.message : err}`);
+        httpLog.error(`[Zoom Backfill] Failed to process meeting ${meeting.id}: ${err instanceof Error ? err.message : err}`);
       });
 
       queued++;
     }
 
-    logger.info(`[Zoom Backfill] Queued ${queued} past meetings for user ${userId}`);
+    httpLog.info(`[Zoom Backfill] Queued ${queued} past meetings for user ${userId}`);
   } catch (err) {
     // Non-fatal: backfill failure should not surface as an error to the user
-    logger.error(`[Zoom Backfill] Backfill failed for user ${userId}: ${err instanceof Error ? err.message : err}`);
+    httpLog.error(`[Zoom Backfill] Backfill failed for user ${userId}: ${err instanceof Error ? err.message : err}`);
   }
 }
 
@@ -284,7 +284,7 @@ async function processRecordingEvent(payload: ZoomWebhookPayload): Promise<void>
 
   // ── Privacy: skip blacklisted meetings ──────────────────────────────────
   if (isBlacklisted(topic)) {
-    logger.info(`[Zoom] Skipping blacklisted meeting: "${topic}"`);
+    httpLog.info(`[Zoom] Skipping blacklisted meeting: "${topic}"`);
     return;
   }
 
@@ -299,14 +299,14 @@ async function processRecordingEvent(payload: ZoomWebhookPayload): Promise<void>
   }
 
   if (!user) {
-    logger.warn(`[Zoom] No connected user found for Zoom user ID: ${zoomUserId} / email: ${zoomEmail}`);
+    httpLog.warn(`[Zoom] No connected user found for Zoom user ID: ${zoomUserId} / email: ${zoomEmail}`);
     return;
   }
 
   // ── Deduplication: skip if already processed ─────────────────────────────
   const existing = await ZoomMeeting.findOne({ zoomMeetingId, userId: user._id });
   if (existing) {
-    logger.info(`[Zoom] Meeting ${zoomMeetingId} already processed for user ${user._id}`);
+    httpLog.info(`[Zoom] Meeting ${zoomMeetingId} already processed for user ${user._id}`);
     return;
   }
 
@@ -316,7 +316,7 @@ async function processRecordingEvent(payload: ZoomWebhookPayload): Promise<void>
   ) as RecordingFile | undefined;
   const downloadUrl = transcriptFile?.download_url;
   if (!downloadUrl) {
-    logger.warn(`[Zoom] No transcript URL in meeting ${zoomMeetingId}`);
+    httpLog.warn(`[Zoom] No transcript URL in meeting ${zoomMeetingId}`);
     return;
   }
 
@@ -336,14 +336,14 @@ async function processRecordingEvent(payload: ZoomWebhookPayload): Promise<void>
     sourceType: 'zoom',
   });
 
-  logger.info(`[Zoom] Created meeting record ${meeting._id} for Zoom ID ${zoomMeetingId} (user: ${user._id})`);
+  httpLog.info(`[Zoom] Created meeting record ${meeting._id} for Zoom ID ${zoomMeetingId} (user: ${user._id})`);
 
   // ── Async: download + parse + extract using user's token ────────────────
   processTranscriptForUser(meeting, user._id.toString()).catch((err) => {
     const msg = err instanceof CircuitOpenError
       ? 'Circuit breaker open — Zoom API temporarily unavailable'
       : (err instanceof Error ? err.message : String(err));
-    logger.error(`[Zoom] processTranscript failed for meeting ${meeting._id}: ${msg}`);
+    httpLog.error(`[Zoom] processTranscript failed for meeting ${meeting._id}: ${msg}`);
     recordZoomError(msg);
   });
 }
@@ -389,7 +389,7 @@ export async function processTranscriptPayloadInternal(
       return;
     }
     if (warning) {
-      logger.warn(`[Zoom] Transcript for meeting ${meeting._id} is short (<50 chars) — processing anyway`);
+      httpLog.warn(`[Zoom] Transcript for meeting ${meeting._id} is short (<50 chars) — processing anyway`);
     }
 
     // Parse: VTT with speakers or plain text
@@ -436,7 +436,7 @@ export async function processTranscriptPayloadInternal(
       progress: { stage: 'embedding', percent: 80, message: 'Generating knowledge base embeddings…' },
     });
 
-    logger.info(`[Zoom] Processed meeting ${meeting._id}: ${insightDocs.length} insights extracted.`);
+    httpLog.info(`[Zoom] Processed meeting ${meeting._id}: ${insightDocs.length} insights extracted.`);
 
     // ── Also extract knowledge for the knowledge base (non-blocking) ─────────
     await processZoomMeetingForKnowledge(meeting._id.toString());
@@ -513,7 +513,7 @@ export async function getZoomPublicStats(_req: Request, res: Response): Promise<
     });
   } catch (err) {
     // Don't 500 the homepage — return zeros and let the UI hide the section, but log warning
-    logger.warn(`[zoom] Failed to get homepage stats: ${(err as Error).message}`);
+    httpLog.warn(`[zoom] Failed to get homepage stats: ${(err as Error).message}`);
     res.json({ meetingsProcessed: 0, insightsExtracted: 0, knowledgeExtracted: 0, faqsPromoted: 0 });
   }
 }
@@ -589,7 +589,7 @@ export async function updateInsight(req: Request, res: Response): Promise<void> 
   }
 
   await insight.save();
-  logger.info(`[Zoom Insight] ${status} by user ${(req as Request & { user?: { id: string } }).user?.id}: ${insight._id}`);
+  httpLog.info(`[Zoom Insight] ${status} by user ${(req as Request & { user?: { id: string } }).user?.id}: ${insight._id}`);
   res.json({ insight });
 }
 
@@ -627,17 +627,17 @@ export async function convertInsightToFAQ(req: Request, res: Response): Promise<
     generateEmbedding(faq.question).then(emb => {
       if (emb) {
         FAQ.findByIdAndUpdate(faq._id, { embedding: emb }).catch((err) => {
-          logger.warn(`[zoom] Failed to save generated FAQ embedding for ${faq._id}: ${(err as Error).message}`);
+          httpLog.warn(`[zoom] Failed to save generated FAQ embedding for ${faq._id}: ${(err as Error).message}`);
         });
       }
     }).catch((err) => {
-      logger.warn(`[zoom] Failed to generate embedding for FAQ ${faq._id}: ${(err as Error).message}`);
+      httpLog.warn(`[zoom] Failed to generate embedding for FAQ ${faq._id}: ${(err as Error).message}`);
     });
 
     insight.publishedFaqId = faq._id as mongoose.Types.ObjectId;
     await insight.save();
 
-    logger.info(`[Zoom] Insight ${insight._id} promoted to FAQ ${faq._id}`);
+    httpLog.info(`[Zoom] Insight ${insight._id} promoted to FAQ ${faq._id}`);
     res.json({ faq });
   } catch (err) {
     res.status(500).json({ message: 'Failed to convert insight to FAQ', error: (err as Error).message });
@@ -653,7 +653,7 @@ function isBlacklisted(topic: string): boolean {
     try {
       return new RegExp(pattern.trim(), 'i').test(topic);
     } catch (err) {
-      logger.warn(`[zoom] Invalid regex in blacklist pattern '${pattern}': ${(err as Error).message}`);
+      httpLog.warn(`[zoom] Invalid regex in blacklist pattern '${pattern}': ${(err as Error).message}`);
       return false;
     }
   });
@@ -706,7 +706,7 @@ export async function retryMeeting(req: Request, res: Response): Promise<void> {
 
   try {
     await manualRetry(meeting._id.toString());
-    logger.info(`[Zoom] Admin ${(req.user as unknown as { _id: string })._id} manually retried meeting ${meeting._id}`);
+    httpLog.info(`[Zoom] Admin ${(req.user as unknown as { _id: string })._id} manually retried meeting ${meeting._id}`);
     res.json({
       message: 'Meeting re-queued for processing.',
       meetingId: meeting._id.toString(),

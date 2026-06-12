@@ -45,7 +45,7 @@ import {
   isGoldenTicket,
 } from './supportCore.js';
 import { spendSpurtiPoints } from '../services/promotionService.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 import {
   assertCanCreateContent,
   computeGoldenBanExpiry,
@@ -205,7 +205,7 @@ export async function listGoldenTickets(req: Request, res: Response): Promise<vo
       banHours: BAN_HOURS,
     });
   } catch (err) {
-    logger.error(`[goldenTicketAdmin] listGoldenTickets failed: ${(err as Error).message}`);
+    adminLog.error(`[goldenTicketAdmin] listGoldenTickets failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load Golden tickets.' });
   }
 }
@@ -290,7 +290,7 @@ export async function resolveGoldenTicket(req: Request, res: Response): Promise<
 
     res.json({ request: stripAdminOnlyFields(request.toObject(), true) });
   } catch (err) {
-    logger.error(`[goldenTicketAdmin] resolveGoldenTicket failed: ${(err as Error).message}`);
+    adminLog.error(`[goldenTicketAdmin] resolveGoldenTicket failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to resolve Golden ticket.' });
   }
 }
@@ -406,7 +406,7 @@ export async function rejectGoldenTicket(req: Request, res: Response): Promise<v
 
     res.json({ request: stripAdminOnlyFields(request.toObject(), true), penalty });
   } catch (err) {
-    logger.error(`[goldenTicketAdmin] rejectGoldenTicket failed: ${(err as Error).message}`);
+    adminLog.error(`[goldenTicketAdmin] rejectGoldenTicket failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to reject Golden ticket.' });
   }
 }
@@ -538,7 +538,7 @@ export async function banAndRejectGoldenTicket(req: Request, res: Response): Pro
       bannedUntil: user.goldenBannedUntil,
     });
   } catch (err) {
-    logger.error(`[goldenTicketAdmin] banAndRejectGoldenTicket failed: ${(err as Error).message}`);
+    adminLog.error(`[goldenTicketAdmin] banAndRejectGoldenTicket failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to ban and reject Golden ticket.' });
   }
 }
@@ -566,7 +566,7 @@ export async function clearExpiredGoldenBans(now: Date = new Date()): Promise<{ 
     },
   );
   if (result.modifiedCount > 0) {
-    logger.info(`[goldenTicketAdmin] cleared ${result.modifiedCount} expired Golden ban(s).`);
+    adminLog.info(`[goldenTicketAdmin] cleared ${result.modifiedCount} expired Golden ban(s).`);
   }
   return { cleared: result.modifiedCount };
 }

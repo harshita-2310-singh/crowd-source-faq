@@ -31,7 +31,7 @@ function decodeExpiry(token: string): Date {
     const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf-8')) as { exp?: number };
     return new Date((payload.exp ?? Math.floor(Date.now() / 1000) + 7 * 86400) * 1000);
   } catch (err) {
-    logger.warn(`[auth] Failed to decode token expiry, using fallback (7 days): ${(err as Error).message}`);
+    authLog.warn(`[auth] Failed to decode token expiry, using fallback (7 days): ${(err as Error).message}`);
     // Fallback: 7 days from now, matches the default expiresIn.
     return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   }
@@ -365,7 +365,7 @@ export const deleteUser = async (req: Request, res: Response): Promise<void> => 
     // Clean up private data that shouldn't persist
     await Notification.deleteMany({ recipient: target._id });
 
-    logger.audit?.('user_deleted', {
+    authLog.audit?.('user_deleted', {
       adminId: req.user._id.toString(),
       targetId: req.params.id,
       requestId: (req as Request & { id: string }).id,
@@ -400,7 +400,7 @@ export const exportUserData = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    logger.audit?.('data_export', { userId, requestId });
+    authLog.audit?.('data_export', { userId, requestId });
 
     const u = user as any;
     const exportData = {
@@ -449,7 +449,7 @@ export const exportUserData = async (req: Request, res: Response): Promise<void>
     res.setHeader('Content-Disposition', `attachment; filename="yaksha-export-${userId.slice(-8)}.json"`);
     res.json(exportData);
   } catch (error) {
-    logger.error('Data export failed', { /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ }, requestId);
+    authLog.error('Data export failed', { error: process.env.NODE_ENV === 'development' ? (error as Error).message : 'export failed' });
     res.status(500).json({ message: 'Export failed. Please try again.' });
   }
 };

@@ -18,7 +18,7 @@ import CommunityPost from '../models/CommunityPost.js';
 import { generateEmbedding } from '../utils/ai/embeddings.js';
 import { detectDuplicatesWithAI } from '../utils/ai/duplicateDetector.js';
 import { resolveProviderAsync } from '../utils/ai/aiProvider.js';
-import { logger } from '../utils/http/logger.js';
+import { communityLog } from '../utils/http/logger.js';
 
 // ─── Thresholds ────────────────────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ export async function checkDuplicate(
   // 1. FAQ hybrid search (vector + text)
   try {
     const queryEmbedding = await generateEmbedding(query).catch((err) => {
-      logger.warn(`[postDuplicate] Failed to generate embedding for duplicate check query: ${(err as Error).message}`);
+      communityLog.warn(`[postDuplicate] Failed to generate embedding for duplicate check query: ${(err as Error).message}`);
       return null;
     });
     const vectorThreshold = isShortQuery
@@ -195,7 +195,7 @@ export async function checkDuplicate(
       }
     }
   } catch (err) {
-    logger.warn(`FAQ duplicate check failed: ${(err as Error).message}`);
+    communityLog.warn(`FAQ duplicate check failed: ${(err as Error).message}`);
   }
 
   // 2. Community post keyword search
@@ -240,7 +240,7 @@ export async function checkDuplicate(
       }
     }
   } catch (err) {
-    logger.warn(`Community duplicate check failed: ${(err as Error).message}`);
+    communityLog.warn(`Community duplicate check failed: ${(err as Error).message}`);
   }
 
   return matches.sort((a, b) => b.score - a.score).slice(0, 5);
@@ -308,7 +308,7 @@ export const checkDuplicateController = async (
           });
         }
       } catch (err) {
-        logger.warn(`[checkDuplicate] knowledge search failed: ${(err as Error).message}`);
+        communityLog.warn(`[checkDuplicate] knowledge search failed: ${(err as Error).message}`);
       }
 
       // Keyword heuristics if knowledge base is also empty

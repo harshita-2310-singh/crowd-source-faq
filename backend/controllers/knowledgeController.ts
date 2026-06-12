@@ -9,7 +9,7 @@ import {
 } from '../services/knowledgeBase.js';
 import { runRag } from '../services/rag.js';
 import { TranscriptKnowledge } from '../models/TranscriptKnowledge.js';
-import { logger } from '../utils/http/logger.js';
+import { adminLog } from '../utils/http/logger.js';
 
 // ─── List all knowledge entries ──────────────────────────────────────────────
 
@@ -199,7 +199,7 @@ export const askAIController = async (req: Request, res: Response): Promise<void
       // Fall back to keyword search only (knowledge base), which doesn't
       // depend on the AI provider. This way the user still sees relevant
       // sources and can click through to the full FAQ/post.
-      logger.warn('[askAI] runRag failed, falling back to KB-only search', { error: (ragErr as Error).message });
+      adminLog.warn('[askAI] runRag failed, falling back to KB-only search', { error: (ragErr as Error).message });
       const kbMatches = await searchKnowledge(question, 6);
       result = {
         answer: '',
@@ -215,7 +215,7 @@ export const askAIController = async (req: Request, res: Response): Promise<void
       };
       aiFailed = true;
     }
-    logger.info('[askAI] rag.completed', { ms: Date.now() - t0, sourceCount: result.sources.length, attachments: attachments.length, aiFailed });
+    adminLog.info('[askAI] rag.completed', { ms: Date.now() - t0, sourceCount: result.sources.length, attachments: attachments.length, aiFailed });
 
     // Translate RagSource → SourceHit shape for the frontend.
     const sources = result.sources.map((s) => ({
@@ -264,7 +264,7 @@ export const askAIController = async (req: Request, res: Response): Promise<void
       aiFailed,
     });
   } catch (err) {
-    logger.error('[askAI] failed', { error: (err as Error).message });
+    adminLog.error('[askAI] failed', { error: (err as Error).message });
     res.status(500).json({ message: (err as Error).message });
   }
 };

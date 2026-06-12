@@ -23,7 +23,7 @@ import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import { logAction } from './adminController.js';
 import { escalationsTotal } from '../utils/http/metrics.js';
-import { logger } from '../utils/http/logger.js';
+import { cronLog } from '../utils/http/logger.js';
 import { clearExpiredGoldenBans } from './goldenTicketAdminController.js';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -57,20 +57,20 @@ export function startEscalationScheduler(): void {
   escalationIntervalHandle = setInterval(() => {
     // Run fire-and-forget — errors are logged inside the functions.
     runUnansweredEscalationCheck().catch((err) => {
-      logger.error(`[escalation] Scheduler error: ${(err as Error).message}`);
+      cronLog.error(`[escalation] Scheduler error: ${(err as Error).message}`);
     });
     runTimeTrialCheck().catch((err) => {
-      logger.error(`[time-trial] Scheduler error: ${(err as Error).message}`);
+      cronLog.error(`[time-trial] Scheduler error: ${(err as Error).message}`);
     });
     // v1.66 — Clear expired Golden Ticket bans so the DB doesn't
     // accumulate stale `goldenBannedUntil` values. The auth check
     // is `goldenBannedUntil > now` so this is just bookkeeping.
     clearExpiredGoldenBans().catch((err) => {
-      logger.error(`[goldenTicketAdmin] clearExpiredGoldenBans error: ${(err as Error).message}`);
+      cronLog.error(`[goldenTicketAdmin] clearExpiredGoldenBans error: ${(err as Error).message}`);
     });
   }, ms);
 
-  logger.info(
+  cronLog.info(
     `[escalation] Scheduler started — checking every ${CHECK_INTERVAL_MINUTES}m ` +
     `for posts unanswered > ${UNANSWERED_ESCALATION_DAYS}d`
   );
@@ -81,7 +81,7 @@ export function stopEscalationScheduler(): void {
   if (escalationIntervalHandle) {
     clearInterval(escalationIntervalHandle);
     escalationIntervalHandle = null;
-    logger.info('[escalation] Scheduler stopped.');
+    cronLog.info('[escalation] Scheduler stopped.');
   }
 }
 
@@ -122,7 +122,7 @@ export async function runUnansweredEscalationCheck(): Promise<void> {
       message: `${eligible.length} community question${eligible.length === 1 ? '' : 's'} ha${eligible.length === 1 ? 's' : 've'} been unanswered for ${UNANSWERED_ESCALATION_DAYS}+ days and need moderator attention.`,
       link: '/admin/moderation?tab=escalated',
     }).catch((err) => {
-      logger.warn(`[escalation] Failed to notify mod/admin ${mod._id} on unanswered question escalation: ${(err as Error).message}`);
+      cronLog.warn(`[escalation] Failed to notify mod/admin ${mod._id} on unanswered question escalation: ${(err as Error).message}`);
     }) // non-critical
   );
 
@@ -140,7 +140,7 @@ export async function runUnansweredEscalationCheck(): Promise<void> {
 
   escalationsTotal.inc({ count: eligible.length });
 
-  logger.info(
+  cronLog.info(
     `[escalation] Auto-escalated ${eligible.length} unanswered post${eligible.length === 1 ? '' : 's'}.`
   );
 }
@@ -180,7 +180,7 @@ export async function runTimeTrialCheck(): Promise<void> {
     }
   );
 
-  logger.info(
+  cronLog.info(
     `[time-trial] Activated ${eligible.length} Time-Trial post${eligible.length === 1 ? '' : 's'}.`
   );
 }

@@ -3,7 +3,7 @@ import mongoose, { Types } from 'mongoose';
 import SearchLog from '../models/SearchLog.js';
 import { generateEmbedding } from '../utils/ai/embeddings.js';
 import { LRUCache } from 'lru-cache';
-import { logger } from '../utils/http/logger.js';
+import { httpLog } from '../utils/http/logger.js';
 import { getCachedResults, setCachedResults } from '../utils/http/cache.js';
 import {
   computeRRF,
@@ -48,7 +48,7 @@ function scheduleFlush(): void {
       searchLogFlushes.inc();
     } catch (err) {
       // silently discard failed batch inserts, but log warning
-      logger.warn(`[search] Failed to flush buffered search logs to DB: ${(err as Error).message}`);
+      httpLog.warn(`[search] Failed to flush buffered search logs to DB: ${(err as Error).message}`);
     } finally {
       searchLogFlushActive.dec();
     }
@@ -67,7 +67,7 @@ searchLogFlushActive.inc();
         searchLogFlushes.inc();
       })
       .catch((err) => {
-        logger.warn(`[search] Failed to insert buffered search logs: ${(err as Error).message}`);
+        httpLog.warn(`[search] Failed to insert buffered search logs: ${(err as Error).message}`);
       })
       .finally(() => {
         searchLogFlushActive.dec();
@@ -91,7 +91,7 @@ searchLogFlushActive.inc();
     await SearchLog.insertMany(logs, { ordered: false });
     searchLogFlushes.inc();
   } catch (err) {
-    logger.warn(`[search] Failed to insert search logs on immediate flush: ${(err as Error).message}`);
+    httpLog.warn(`[search] Failed to insert search logs on immediate flush: ${(err as Error).message}`);
   } finally {
     searchLogFlushActive.dec();
   }
@@ -114,7 +114,7 @@ const runTextSearch = async (collectionName: string, queryStr: string, limit = 5
     .toArray() as SearchResultItem[];
   } catch (error) {
     // Fail gracefully if the text index hasn't been built yet
-    logger.warn(`Text search on '${collectionName}' failed: ${(error as Error).message}`);
+    httpLog.warn(`Text search on '${collectionName}' failed: ${(error as Error).message}`);
     return [];
   }
 };
@@ -180,7 +180,7 @@ const runVectorSearch = async (collectionName: string, queryEmbedding: number[],
 
     return await collection.aggregate(pipeline).toArray() as SearchResultItem[];
   } catch (error) {
-    logger.warn(`Vector search on '${collectionName}' failed: ${(error as Error).message}`);
+    httpLog.warn(`Vector search on '${collectionName}' failed: ${(error as Error).message}`);
     return [];
   }
 };
@@ -288,7 +288,7 @@ export const semanticSearch = async (req: Request, res: Response): Promise<void>
           return;
         }
       } catch (e) {
-        logger.warn('search.knowledge.fallback.failed', { error: (e as Error).message });
+        httpLog.warn('search.knowledge.fallback.failed', { error: (e as Error).message });
       }
     }
 
@@ -310,7 +310,7 @@ export const semanticSearch = async (req: Request, res: Response): Promise<void>
 
     res.json({ results: filtered, total: filtered.length, cached: false });
   } catch (error) {
-    logger.error('Search error', { error: error instanceof Error ? error.message : String(error) });
+    httpLog.error('Search error', { error: error instanceof Error ? error.message : String(error) });
     res.status(500).json({ message: 'Search failed', /* error: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined */ });
   }
 };

@@ -19,7 +19,7 @@ import type { IContextField } from '../models/SupportCategory.js';
 import type { SupportStatus } from '../models/SupportRequest.js';
 import Notification from '../models/Notification.js';
 import AdminLog from '../models/AdminLog.js';
-import { logger } from '../utils/http/logger.js';
+import { supportLog } from '../utils/http/logger.js';
 import { isFeatureEnabled } from './featureFlagController.js';
 
 // ─── Valid statuses (mirrors the model enum) ────────────────────────────────
@@ -171,7 +171,7 @@ export async function fanOutToAdmins(
       })),
     );
   } catch (err) {
-    logger.warn(`[support] fanOutToAdmins failed: ${(err as Error).message}`);
+    supportLog.warn(`[support] fanOutToAdmins failed: ${(err as Error).message}`);
   }
 }
 
@@ -189,7 +189,7 @@ export async function notifyUser(
       metadata: payload.metadata,
     });
   } catch (err) {
-    logger.warn(`[support] notifyUser failed: ${(err as Error).message}`);
+    supportLog.warn(`[support] notifyUser failed: ${(err as Error).message}`);
   }
 }
 
@@ -209,7 +209,7 @@ export async function logAdminAction(
       details,
     });
   } catch (err) {
-    logger.warn(`[support] logAdminAction failed: ${(err as Error).message}`);
+    supportLog.warn(`[support] logAdminAction failed: ${(err as Error).message}`);
   }
 }
 

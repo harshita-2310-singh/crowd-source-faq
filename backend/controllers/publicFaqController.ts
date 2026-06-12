@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import FAQ from '../models/FAQ.js';
 import GuestEvent, { type GuestEventType } from '../models/GuestEvent.js';
-import { logger } from '../utils/http/logger.js';
+import { communityLog } from '../utils/http/logger.js';
 import { LRUCache } from 'lru-cache';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -116,7 +116,7 @@ export async function getPopularFaqs(req: Request, res: Response): Promise<void>
     popularCache.set(cacheKey, payload);
     res.json(payload);
   } catch (err) {
-    logger.error(`[publicFaq] getPopularFaqs failed: ${(err as Error).message}`);
+    communityLog.error(`[publicFaq] getPopularFaqs failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load popular FAQs.' });
   }
 }
@@ -156,7 +156,7 @@ export async function getRecentFaqs(req: Request, res: Response): Promise<void> 
     recentCache.set(cacheKey, payload);
     res.json(payload);
   } catch (err) {
-    logger.error(`[publicFaq] getRecentFaqs failed: ${(err as Error).message}`);
+    communityLog.error(`[publicFaq] getRecentFaqs failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load recent FAQs.' });
   }
 }
@@ -225,7 +225,7 @@ export async function getCategories(req: Request, res: Response): Promise<void> 
     categoriesCache.set(cacheKey, payload);
     res.json(payload);
   } catch (err) {
-    logger.error(`[publicFaq] getCategories failed: ${(err as Error).message}`);
+    communityLog.error(`[publicFaq] getCategories failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load categories.' });
   }
 }
@@ -254,7 +254,7 @@ export async function getPublicFaqById(req: Request, res: Response): Promise<voi
     }
     res.json(shapeFaq(faq));
   } catch (err) {
-    logger.error(`[publicFaq] getPublicFaqById failed: ${(err as Error).message}`);
+    communityLog.error(`[publicFaq] getPublicFaqById failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Failed to load FAQ.' });
   }
 }
@@ -316,7 +316,7 @@ export async function searchPublicFaqs(req: Request, res: Response): Promise<voi
       count: faqs.length,
     });
   } catch (err) {
-    logger.error(`[publicFaq] searchPublicFaqs failed: ${(err as Error).message}`);
+    communityLog.error(`[publicFaq] searchPublicFaqs failed: ${(err as Error).message}`);
     res.status(500).json({ message: 'Search failed.' });
   }
 }
@@ -379,7 +379,7 @@ export async function trackPublicView(req: Request, res: Response): Promise<void
 
     res.json({ recorded: true, deduped: false });
   } catch (err) {
-    logger.warn(`[publicFaq] trackPublicView failed: ${(err as Error).message}`);
+    communityLog.warn(`[publicFaq] trackPublicView failed: ${(err as Error).message}`);
     // Never block the user — return success-ish even on error.
     res.json({ recorded: false, error: 'tracking failed' });
   }
@@ -456,7 +456,7 @@ export async function trackPublicReading(req: Request, res: Response): Promise<v
     });
     res.json({ recorded: true, type: eventType });
   } catch (err) {
-    logger.warn(`[publicFaq] trackPublicReading failed: ${(err as Error).message}`);
+    communityLog.warn(`[publicFaq] trackPublicReading failed: ${(err as Error).message}`);
     res.json({ recorded: false, error: 'tracking failed' });
   }
 }
@@ -606,11 +606,11 @@ export async function recomputePopularity(): Promise<{ updated: number; duration
 
     const durationMs = Date.now() - start;
     const updated = ops.length + baseline.length;
-    logger.info(`[publicFaq] recomputePopularity: ${updated} FAQs in ${durationMs}ms`);
+    communityLog.info(`[publicFaq] recomputePopularity: ${updated} FAQs in ${durationMs}ms`);
     return { updated, durationMs };
   } catch (err) {
     const durationMs = Date.now() - start;
-    logger.error(`[publicFaq] recomputePopularity failed after ${durationMs}ms: ${(err as Error).message}`);
+    communityLog.error(`[publicFaq] recomputePopularity failed after ${durationMs}ms: ${(err as Error).message}`);
     return { updated: 0, durationMs };
   }
 }
