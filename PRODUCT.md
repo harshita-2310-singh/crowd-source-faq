@@ -98,4 +98,4 @@ Four zero-touch pillars, in order of automation:
 
 - GitHub: https://github.com/vicharanashala/cs15
 - License: see [`LICENSE`](LICENSE)
-- Branch: `MCSFAQ/main`
+- Branch: `main` (active), with `MCSFAQ/main-v2` for the next iteration
