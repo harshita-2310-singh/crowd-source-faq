@@ -34,6 +34,16 @@ function asStringParam(v: string | string[] | undefined): string | undefined {
   return v;
 }
 
+// v1.69 — Phase 9: build a (batchId, issueType) lookup filter
+// for the per-program CRUD handlers. When batchId is null,
+// the filter targets the global default (batchId: null on
+// the doc).
+function batchIdValidFilter(issueType: string, batchId: Types.ObjectId | null): Record<string, unknown> {
+  return batchId
+    ? { issueType, batchId }
+    : { issueType, batchId: null };
+}
+
 function isKebabCase(value: string): boolean {
   return /^[a-z0-9][a-z0-9-]*$/.test(value);
 }
@@ -188,11 +198,19 @@ export async function createCategory(req: Request, res: Response): Promise<void>
 }
 
 /** PATCH /api/support/categories/:issueType — update label / shortLabel /
- *  description / steps / iconKey / isActive / displayOrder. (Fields are
+ *  description / iconKey / steps / isActive / displayOrder. Field CRUD is
  *  managed via the field-specific endpoints below.) */
 export async function updateCategory(req: Request, res: Response): Promise<void> {
   const issueType = asStringParam(req.params.issueType);
   if (!issueType) { res.status(400).json({ message: 'Invalid issueType.' }); return; }
+  // v1.69 — Phase 9: per-program scope. When ?batchId=... is
+  // supplied, target the per-program override; otherwise the
+  // global default. The (batchId, issueType) pair is the
+  // unique lookup.
+  const rawBatch = req.query.batchId;
+  const batchId = typeof rawBatch === 'string' && Types.ObjectId.isValid(rawBatch)
+    ? new Types.ObjectId(rawBatch)
+    : null;
 
   const body = (req.body ?? {}) as {
     label?: string;
@@ -222,7 +240,9 @@ export async function updateCategory(req: Request, res: Response): Promise<void>
 
   try {
     const cat = await SupportCategory.findOneAndUpdate(
-      { issueType },
+      // v1.69 — Phase 9: (batchId, issueType) — see comment at
+      // the top of the function.
+      batchIdValidFilter(issueType, batchId),
       { $set: update },
       { new: true },
     ).lean();
@@ -240,8 +260,15 @@ export async function updateCategory(req: Request, res: Response): Promise<void>
 export async function deleteCategory(req: Request, res: Response): Promise<void> {
   const issueType = asStringParam(req.params.issueType);
   if (!issueType) { res.status(400).json({ message: 'Invalid issueType.' }); return; }
+  // v1.69 — Phase 9: per-program scope. Mirrors the update path.
+  const rawBatch = req.query.batchId;
+  const batchId = typeof rawBatch === 'string' && Types.ObjectId.isValid(rawBatch)
+    ? new Types.ObjectId(rawBatch)
+    : null;
   try {
-    const cat = await SupportCategory.findOneAndDelete({ issueType }).lean();
+    const cat = await SupportCategory.findOneAndDelete(
+      batchIdValidFilter(issueType, batchId)
+    ).lean();
     if (!cat) { res.status(404).json({ message: 'Category not found.' }); return; }
     res.json({ deleted: true });
   } catch (err) {

@@ -26,8 +26,10 @@ import adminApi from '../utils/adminApi';
 // per-program feature flag toggle. Replaces the previous
 // placeholder curl snippet on the Features tab.
 import ProgramFeatureFlagsTab from '../components/program/ProgramFeatureFlagsTab';
+// v1.69 — Phase 9 admin UI: per-program support category CRUD widget.
+import ProgramSupportCategoriesTab from '../components/program/ProgramSupportCategoriesTab';
 
-type Tab = 'overview' | 'settings' | 'courses' | 'members' | 'ai' | 'zoom' | 'discord' | 'features' | 'support';
+type Tab = 'overview' | 'settings' | 'courses' | 'members' | 'ai' | 'zoom' | 'discord' | 'features' | 'support' | 'appSettings';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'overview', label: 'Overview' },
@@ -194,6 +196,9 @@ export default function AdminProgramDetail(): React.ReactElement {
         {tab === 'support' && (
           <SupportTab programId={programId} />
         )}
+        {tab === 'appSettings' && (
+          <AppSettingsTab programId={programId} />
+        )}
       </motion.div>
     </div>
   );
@@ -315,22 +320,13 @@ function ZoomTab({ programId: _programId }: { programId: string }) {
   );
 }
 
-function DiscordTab({ programId: _programId }: { programId: string }) {
-  return (
-    <div className="rounded-2xl border border-border/60 bg-card/40 p-6 space-y-3">
-      <p className="text-sm text-ink-soft">
-        Per-program Discord bot — application ID / guild ID / bot token
-        (encrypted) / webhook URL. The runtime BotManager spawns one bot per
-        program on server boot.
-      </p>
-      <code className="block text-[11px] bg-mist rounded-md p-2 text-ink-soft break-all">
-        PUT /api/admin/programs/{_programId}/discord
-      </code>
-      <code className="block text-[11px] bg-mist rounded-md p-2 text-ink-soft break-all">
-        POST /api/admin/programs/{_programId}/discord/{'{ enable | disable }'}
-      </code>
-    </div>
-  );
+function SupportTab({ programId }: { programId: string }) {
+  // v1.69 — Phase 9 admin UI: real interactive widget for
+  // the per-program support category CRUD. Replaces the
+  // previous placeholder curl snippet. Calls
+  // GET/POST/PATCH/DELETE /api/support/categories with the
+  // program's batchId in the params (read) or body (write).
+  return <ProgramSupportCategoriesTab programId={programId} />;
 }
 
 function FeaturesTab({ programId }: { programId: string }) {
@@ -343,25 +339,49 @@ function FeaturesTab({ programId }: { programId: string }) {
   return <ProgramFeatureFlagsTab programId={programId} />;
 }
 
-function SupportTab({ programId: _programId }: { programId: string }) {
+function DiscordTab({ programId: _programId }: { programId: string }) {
   return (
     <div className="rounded-2xl border border-border/60 bg-card/40 p-6 space-y-3">
       <p className="text-sm text-ink-soft">
-        Per-program app settings (Golden Ticket cooldown / SP cost / penalty
-        multiplier) + per-program SupportCategory overrides.
+        Per-program Discord bot — application ID / guild ID / bot token
+        (encrypted) / webhook URL / notification channel. The
+        runtime BotManager spawns one bot per program on
+        server boot.
       </p>
       <code className="block text-[11px] bg-mist rounded-md p-2 text-ink-soft break-all">
-        GET  /api/admin/programs/{_programId}/settings
+        GET    /api/admin/programs/{_programId}/discord
       </code>
       <code className="block text-[11px] bg-mist rounded-md p-2 text-ink-soft break-all">
-        PUT  /api/admin/programs/{_programId}/settings  body: {'{ key, value }'}
+        PUT    /api/admin/programs/{_programId}/discord
       </code>
-      <p className="text-[11px] text-ink-faint">
-        The public support form calls <code>GET /api/support/categories?batchId=...</code>
-        which merges the per-program and global categories. Use
-        <code className="px-1">?includeOverrides=true</code> in admin to see both
-        views side by side.
+      <code className="block text-[11px] bg-mist rounded-md p-2 text-ink-soft break-all">
+        POST   /api/admin/programs/{_programId}/discord/enable
+      </code>
+      <code className="block text-[11px] bg-mist rounded-md p-2 text-ink-soft break-all">
+        POST   /api/admin/programs/{_programId}/discord/disable
+      </code>
+    </div>
+  );
+}
+
+function AppSettingsTab({ programId }: { programId: string }) {
+  // v1.69 — Phase 9 admin UI: per-program app settings.
+  // Stub for now — the resolver + admin endpoint landed in
+  // Phase 9; the full admin UI is a follow-up. For now the
+  // tab shows the programmatic API hint.
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/40 p-6 space-y-3">
+      <p className="text-sm text-ink-soft">
+        Per-program app settings (Golden Ticket cooldown / SP
+        cost / penalty multiplier). Use the programmatic API for
+        now; the admin UI is a follow-up.
       </p>
+      <code className="block text-[11px] bg-mist rounded-md p-2 text-ink-soft break-all">
+        GET  /api/admin/programs/{programId}/settings
+      </code>
+      <code className="block text-[11px] bg-mist rounded-md p-2 text-ink-soft break-all">
+        PUT  /api/admin/programs/{programId}/settings  body: {'{ key, value }'}
+      </code>
     </div>
   );
 }
