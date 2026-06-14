@@ -124,11 +124,23 @@ function AppRoutes() {
     <>
       <Routes>
         <Route element={<MainLayout />}>
-          {/* The public FAQ discovery page is now the base URL — anyone
-              landing on the site gets the no-auth, anonymous-analytics
-              experience. */}
-          <Route path="/" element={<ProgramPortalPage />} />
-          <Route path="/explore/select" element={<Navigate to="/" replace />} />
+          {/* v1.69 — Phase 12: `/` is now the original HomePage
+              (search + popular/recent FAQs + category accordion +
+              top solved + trending issues + FromMeetings). The
+              active program is determined by the admin's
+              BatchContext selection (the default program on
+              cold start, or whatever the admin last picked).
+              Non-admin users do NOT see a program picker on `/`. */}
+          <Route path="/" element={<HomePage />} />
+          {/* v1.69 — Phase 12: the program picker (formerly
+              served at `/`) is now at `/programs` for explicit
+              program browsing. Admins land here from the
+              Programs Hub link; non-admins generally don't
+              need it. */}
+          <Route path="/programs" element={<ProgramPortalPage />} />
+          {/* v1.69 — Phase 12: keep the legacy redirect for
+              bookmarks that pointed at the old picker URL. */}
+          <Route path="/explore/select" element={<Navigate to="/programs" replace />} />
           <Route path="/faq" element={<FAQPage />} />
           <Route path="/faq/:id" element={<FAQPage />} />
           <Route path="/community" element={<CommunityPage />} />
