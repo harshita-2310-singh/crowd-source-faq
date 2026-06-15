@@ -20,7 +20,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import adminApi from '../utils/adminApi';
 // v1.69 — Phase 8 admin UI: real interactive widget for the
 // per-program feature flag toggle. Replaces the previous
@@ -32,7 +32,7 @@ import ProgramSupportCategoriesTab from '../components/program/ProgramSupportCat
 // (Golden Ticket cooldown / SP cost / penalty multiplier).
 import ProgramAppSettingsTab from '../components/program/ProgramAppSettingsTab';
 
-type Tab = 'overview' | 'settings' | 'courses' | 'members' | 'ai' | 'zoom' | 'discord' | 'features' | 'support' | 'appSettings';
+type Tab = 'overview' | 'settings' | 'courses' | 'members' | 'ai' | 'zoom' | 'discord' | 'features' | 'support' | 'appSettings' | 'categories';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'overview', label: 'Overview' },
@@ -44,8 +44,12 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'discord',  label: 'Discord' },
   { key: 'features', label: 'Features' },
   { key: 'support',  label: 'Support' },
+  { key: 'appSettings', label: 'App' },
+  // v1.70 — Dynamic Categories tab. Clicking navigates to
+  // /admin/programs/:id/categories (a dedicated page), since
+  // the cluster editor has its own state and refresh loop.
+  { key: 'categories', label: 'Categories' },
 ];
-
 interface ProgramInfo {
   _id: string;
   name: string;
@@ -69,6 +73,7 @@ function StatBox({ label, value }: { label: string; value: number | string }) {
 
 export default function AdminProgramDetail(): React.ReactElement {
   const params = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const programId = params.id ?? '';
   const [tab, setTab] = useState<Tab>('overview');
   const [info, setInfo] = useState<ProgramInfo | null>(null);
@@ -150,11 +155,17 @@ export default function AdminProgramDetail(): React.ReactElement {
         <div className="flex items-center gap-1 overflow-x-auto">
           {TABS.map((t) => {
             const isActive = tab === t.key;
+            // The 'categories' tab navigates to a dedicated
+            // route rather than rendering inline — the cluster
+            // editor has its own load/save/refresh state.
+            const onClick = t.key === 'categories'
+              ? () => navigate(`/admin/programs/${programId}/categories`)
+              : () => setTab(t.key);
             return (
               <button
                 key={t.key}
                 type="button"
-                onClick={() => setTab(t.key)}
+                onClick={onClick}
                 className={`px-4 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
                   isActive
                     ? 'border-accent text-accent'

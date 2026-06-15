@@ -48,6 +48,24 @@ export interface SearchResponse {
   count: number;
 }
 
+// ─── Dynamic Categories (v1.70) ──────────────────────────────────────────
+// Per-program cluster of FAQ category strings. The 24h backend cron
+// (see utils/ai/categoryClusterer.ts) recomputes these from the live
+// FAQ embeddings; the search overlay reads them via
+// /api/public/category-clusters.
+export interface CategoryCluster {
+  canonicalName: string;
+  aliases: string[];
+  faqCount: number;
+  lastRefreshedAt: string;
+}
+
+export interface CategoryClustersResponse {
+  clusters: CategoryCluster[];
+  total: number;
+  limit: number;
+}
+
 export type TrackViewResponse = {
   recorded: boolean;
   deduped?: boolean;

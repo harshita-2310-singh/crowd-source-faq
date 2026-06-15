@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../utils/api';
 import type {
   CategoriesResponse,
+  CategoryClustersResponse,
   PopularResponse,
   PublicFaq,
   RecentResponse,
@@ -103,6 +104,24 @@ export function usePublicFaqSearch(batchId: string | null, courseId: string | nu
 
 export function usePublicFaqById(id: string | null) {
   return usePublicGet<PublicFaq>(id ? `/public/faqs/${id}` : null);
+}
+
+/**
+ * v1.70 — Dynamic Categories hook. Fetches the AI-named category
+ * clusters for the given program from /api/public/category-clusters.
+ *
+ * The response is the top N (default 10) clusters, sorted by
+ * `faqCount` desc. Components that want to render the suggestion
+ * pills should use this in preference to importing `categoryPills`
+ * from CategoryGrid directly — the dynamic list is per-program
+ * and stays in sync with the live FAQ set.
+ */
+export function useCategoryClusters(batchId: string | null, limit = 10) {
+  const params = useBatchParams(batchId, null, { limit });
+  return usePublicGet<CategoryClustersResponse>(
+    batchId ? '/public/category-clusters' : null,
+    params
+  );
 }
 
 // ─── Tracking helpers (fire-and-forget) ──────────────────────────────────────

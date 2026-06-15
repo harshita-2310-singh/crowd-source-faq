@@ -48,6 +48,7 @@ const AdminAutoAnswerQueue = lazy(() => import('./admin/pages/AdminAutoAnswerQue
 const AdminFAQAudit = lazy(() => import('./admin/pages/AdminFAQAudit'));
 const AdminBatches = lazy(() => import('./admin/pages/AdminBatches'));
 const AdminProgramSettingsPage = lazy(() => import('./admin/pages/AdminProgramSettingsPage'));
+const AdminDynamicCategoriesPage = lazy(() => import('./admin/pages/AdminDynamicCategoriesPage'));
 const AdminCoursesPage = lazy(() => import('./admin/pages/AdminCoursesPage'));
 const AdminProgramDashboard = lazy(() => import('./admin/pages/AdminProgramDashboard'));
 const AdminProgramDetail = lazy(() => import('./admin/pages/AdminProgramDetail'));
@@ -221,6 +222,7 @@ function AppRoutes() {
             theme, hero copy, and which sections show on the
             public program page. */}
         <Route path="/admin/programs/:id/settings" element={<AdminRoute><AdminLayout><AdminProgramSettingsPage /></AdminLayout></AdminRoute>} />
+        <Route path="/admin/programs/:id/categories" element={<AdminRoute><AdminLayout><AdminDynamicCategoriesPage /></AdminLayout></AdminRoute>} />
         {/* v1.69 — Phase 10: admin program dashboard (list) and
             detail (tabbed per-program view). Each tab in the
             detail view is a thin wrapper around the existing

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import SearchBar from './SearchBar';
@@ -7,6 +7,8 @@ import ResultItem from './ResultItem';
 import HistoryModal from '../faq/HistoryModal';
 import api from '../../utils/api';
 import { useAuthGate } from '../../context/AuthModalContext';
+import { useBatch } from '../../context/BatchContext';
+import { useCategoryClusters } from '../explore/usePublicFaqApi';
 import type { SearchResult, TrendingQuery } from '../../types/ui';
 
 interface InteractiveSearchOverlayProps {
@@ -35,6 +37,20 @@ export default function InteractiveSearchOverlay({ onSearchComplete }: Interacti
   const searchBarRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const gate = useAuthGate();
+  // v1.70 — Dynamic Categories: pull the per-program AI-named
+  // clusters for the suggestion pills. We fall back to the
+  // hardcoded `categoryPills` export (kept around for the
+  // pre-24h-refresh window and the offline / API-down case)
+  // until the hook returns data. The 24h backend cron (see
+  // utils/ai/categoryClusterer.ts) keeps the response fresh.
+  const { currentBatch } = useBatch();
+  const activeBatchId = currentBatch?._id ?? null;
+  const { data: clustersData } = useCategoryClusters(activeBatchId, 5);
+  const dynamicPills = useMemo(() => {
+    const cs = clustersData?.clusters ?? [];
+    return cs.map((c) => ({ name: c.canonicalName, icon: null as React.ReactNode }));
+  }, [clustersData]);
+  const pillsToShow = dynamicPills.length > 0 ? dynamicPills : categoryPills;
 
   const handleAskCommunity = gate(
     () => {
@@ -73,10 +89,10 @@ export default function InteractiveSearchOverlay({ onSearchComplete }: Interacti
   const showResultsPanel = loading || Array.isArray(results);
 
   let suggestionItems = normalizedQuery
-    ? categoryPills.filter((cat) => cat.name.toLowerCase().includes(normalizedQuery))
-    : categoryPills.slice(0, 5);
+    ? pillsToShow.filter((cat) => cat.name.toLowerCase().includes(normalizedQuery))
+    : pillsToShow.slice(0, 5);
   if (normalizedQuery && suggestionItems.length === 0) {
-    suggestionItems = categoryPills.slice(0, 5);
+    suggestionItems = pillsToShow.slice(0, 5);
   }
 
   const popularItems = trending.length
