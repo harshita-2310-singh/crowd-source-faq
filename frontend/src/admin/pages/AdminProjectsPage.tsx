@@ -146,9 +146,9 @@ export default function AdminProjectsPage() {
       }
       setIsModalOpen(false);
       fetchProjects();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving project:', error);
-      alert('Failed to save project.');
+      alert(error.response?.data?.message || 'Failed to save project.');
     }
   };
 

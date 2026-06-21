@@ -1,6 +1,6 @@
+import './env.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import helmet from 'helmet';
 // morgan removed in v1.68 — httpLog (via requestLogger.ts)
 // now owns HTTP request logging.
@@ -68,12 +68,11 @@ import { jobQueue } from './utils/http/jobQueue.js';
 import { getCloudinaryConfig } from './utils/http/cloudinary.js';
 import { recomputePopularity } from './controllers/publicFaqController.js';
 import { clusterAllActiveBatches } from './utils/ai/categoryClusterer.js';
+import { migrateZoomSettingsToSessions } from './utils/zoomMigration.js';
 import * as Sentry from '@sentry/node';
 import { expressIntegration } from '@sentry/node';
 
-// Load environment variables (.env + .env.local overrides)
-dotenv.config();
-dotenv.config({ path: '.env.local' });
+// Environment variables are loaded in env.js at the top of the file
 
 // Initialize Sentry
 Sentry.init({
@@ -144,11 +143,13 @@ app.use(cors({
 
     // Check if the origin is in our whitelist or is a dynamic Vercel preview branch
     // Vercel preview deployments — only in non-production
-  const isVercelPreview = process.env.NODE_ENV !== 'production' && origin.endsWith('.vercel.app');
-  if (allowedOrigins.indexOf(origin) !== -1 || isVercelPreview) {
+    const isVercelPreview = process.env.NODE_ENV !== 'production' && origin.endsWith('.vercel.app');
+    const isLocalhost = process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || isVercelPreview || isLocalhost) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(null, false);
     }
   },
   credentials: true, // Required to allow cookies/auth headers
@@ -291,7 +292,7 @@ app.use((err: { status?: number; message?: string; stack?: string }, req: Reques
   });
 });
 
-const PORT = process.env.PORT || 6767;
+const PORT = parseInt(process.env.PORT || '6767', 10);
 
 // Environment Validation
 function validateEnv(): void {
@@ -390,7 +391,7 @@ function validateEnv(): void {
 // in every environment, and only the app.listen() is gated.
 validateEnv();
 if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, async () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     // v1.67 — fire ALERT on startup (Discord ping). This is the
     // "server is alive" signal so you know restarts happened.
     startupLog.alert('backend listening', {
@@ -403,6 +404,7 @@ if (process.env.NODE_ENV !== 'production') {
     // Ensure MongoDB is connected before starting any scheduled tasks
     try {
       await connectDB();
+      await migrateZoomSettingsToSessions();
     } catch (e) {
       startupLog.error('startup DB connect failed', { error: (e as Error).message });
     }

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 import api from '../utils/api';
 import type { FAQItem } from '../components/faq/faqUtils';
@@ -156,7 +155,6 @@ export default function ProgramPage() {
   if (error || !data) {
     return (
       <div className="bg-bg text-ink min-h-screen">
-        <Navbar />
         <div className="max-w-md mx-auto pt-32 px-4 text-center">
           <h1 className="font-serif text-3xl text-ink mb-3">Program not found</h1>
           <p className="text-sm text-ink-soft mb-6">{error ?? 'This program does not exist.'}</p>
@@ -180,10 +178,6 @@ export default function ProgramPage() {
   // the downstream page to this program.
   const scopeParam = `?batchId=${program._id}`;
 
-  // v1.69 — show a "Switch program" link in the navbar if more
-  // than one program is available. Admins always see it.
-  const showSwitcher = availableBatches.length > 1;
-
   return (
     <div
       className="min-h-screen text-ink relative z-0"
@@ -192,7 +186,6 @@ export default function ProgramPage() {
         fontFamily: theme.fontCss,
       }}
     >
-      <Navbar showProgramSwitcher={showSwitcher} />
 
       {/* ── Hero ──────────────────────────────────────────────────────── */}
       <section className="relative pt-32 sm:pt-40 pb-20 px-4 sm:px-6 overflow-hidden">

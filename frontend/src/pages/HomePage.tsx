@@ -22,7 +22,6 @@
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 import SearchBar from '../components/search/SearchBar';
 import { HomeDoodles } from '../components/ui/PageDoodles';
@@ -619,7 +618,6 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-bg grid-bg relative">
       <HomeDoodles />
-      <Navbar />
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 pt-[112px] sm:pt-[128px] pb-10 relative z-10">
         {/* ─── HERO (badge · eyebrow · title · stats · search · pills) ─── */}

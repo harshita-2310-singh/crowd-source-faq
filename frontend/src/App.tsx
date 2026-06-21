@@ -60,6 +60,8 @@ const AdminSupportCategories = lazy(() => import('./admin/pages/AdminSupportCate
 const AdminGoldenTickets = lazy(() => import('./admin/pages/AdminGoldenTickets'));
 const AdminFeatures = lazy(() => import('./admin/pages/AdminFeatures'));
 const AdminWelcomePage = lazy(() => import('./admin/pages/AdminWelcomePage'));
+const AdminZoomAssessmentsPage = lazy(() => import('./admin/pages/AdminZoomAssessmentsPage'));
+const AdminZoomQuestionsPage = lazy(() => import('./admin/pages/AdminZoomQuestionsPage'));
 const AdminProjectsPage = lazy(() => import('./admin/pages/AdminProjectsPage'));
 const AdminLayout = lazy(() => import('./admin/components/layout/AdminLayout'));
 
@@ -182,6 +184,16 @@ function AppRoutes() {
               </AccountRoute>
             }
           />
+
+          {/* Member-only: Welcome Package */}
+          <Route
+            path="/welcome"
+            element={
+              <AccountRoute>
+                <WelcomePackagePage />
+              </AccountRoute>
+            }
+          />
         </Route>
 
         {/* Admin Panel dedicated routes (guarded by AdminRoute) */}
@@ -209,6 +221,8 @@ function AppRoutes() {
         <Route path="/admin/settings/ai" element={<AdminRoute><AdminLayout><AdminAISettings /></AdminLayout></AdminRoute>} />
         <Route path="/admin/faqs/review" element={<AdminRoute><AdminLayout><FaqReview /></AdminLayout></AdminRoute>} />
         <Route path="/admin/welcome" element={<AdminRoute><AdminLayout><AdminWelcomePage /></AdminLayout></AdminRoute>} />
+        <Route path="/admin/zoom" element={<AdminRoute><AdminLayout><AdminZoomAssessmentsPage /></AdminLayout></AdminRoute>} />
+        <Route path="/admin/zoom/questions" element={<AdminRoute><AdminLayout><AdminZoomQuestionsPage /></AdminLayout></AdminRoute>} />
         <Route path="/admin/projects" element={<AdminRoute><AdminLayout><AdminProjectsPage /></AdminLayout></AdminRoute>} />
         <Route path="/admin/auto-answer" element={<AdminRoute><AdminLayout><AdminAutoAnswerQueue /></AdminLayout></AdminRoute>} />
         <Route path="/admin/faq-audit" element={<AdminRoute><AdminLayout><AdminFAQAudit /></AdminLayout></AdminRoute>} />

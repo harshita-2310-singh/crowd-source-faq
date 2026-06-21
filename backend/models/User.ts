@@ -116,6 +116,8 @@ export interface IUser extends Document {
   lastGoldenRejectionAt: Date | null;
   // Welcome Package tracking
   welcomePackageOnboarded: boolean;
+  zoomAssessmentPassed: boolean;
+  seenAssessmentQuestions: string[];
   orientationCompleted: boolean;
   projectAssigned?: string;
   mentorAssigned?: string;
@@ -255,6 +257,8 @@ const userSchema = new MongooseSchema<IUser>(
     goldenBannedAt:     { type: Date, default: null },
     // Welcome Package Tracking (PR #62)
     welcomePackageOnboarded: { type: Boolean, default: false },
+    zoomAssessmentPassed: { type: Boolean, default: false },
+    seenAssessmentQuestions: [{ type: String }],
     orientationCompleted: { type: Boolean, default: false },
     projectAssigned: { type: String, default: null },
     mentorAssigned: { type: String, default: null },

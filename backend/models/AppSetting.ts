@@ -21,7 +21,7 @@
 
 import mongoose, { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
-export type SettingKey = 'goldenCooldownHours';
+export type SettingKey = 'goldenCooldownHours' | 'goldenPenaltyMultiplier' | 'zoomPassScore' | 'zoomQuestionCount' | 'zoomTranscript' | 'zoomUrl' | 'zoomTitle' | 'zoomDescription' | 'zoomDuration' | 'zoomActive' | 'zoomDailyResetTime';
 
 export interface IAppSetting extends Document<string> {
   /** Always 'singleton' — there is only one settings document. */
@@ -35,6 +35,17 @@ export interface IAppSetting extends Document<string> {
      *  "cooldown only, never ban, never deduct beyond the SP
      *  spend". 0 disables the gate entirely. */
     goldenCooldownHours?: number;
+    goldenPenaltyMultiplier?: number;
+    /** Zoom Assessment Gateway Config */
+    zoomPassScore?: number;
+    zoomQuestionCount?: number;
+    zoomTranscript?: string;
+    zoomUrl?: string;
+    zoomTitle?: string;
+    zoomDescription?: string;
+    zoomDuration?: string;
+    zoomActive?: boolean;
+    zoomDailyResetTime?: string;
   };
   /** Last admin to edit. */
   updatedBy: Types.ObjectId | null;
@@ -52,6 +63,21 @@ const appSettingSchema = new MongooseSchema<IAppSetting>(
         min: 0,
         max: 720,
       },
+      goldenPenaltyMultiplier: {
+        type: Number,
+        default: 1.25,
+        min: 0,
+        max: 5,
+      },
+      zoomPassScore: { type: Number, default: 70, min: 0, max: 100 },
+      zoomQuestionCount: { type: Number, default: 10, min: 5, max: 20 },
+      zoomTranscript: { type: String, default: '' },
+      zoomUrl: { type: String, default: '' },
+      zoomTitle: { type: String, default: 'Onboarding Zoom Session' },
+      zoomDescription: { type: String, default: 'Join us for the live onboarding.' },
+      zoomDuration: { type: String, default: '60 minutes' },
+      zoomActive: { type: Boolean, default: false },
+      zoomDailyResetTime: { type: String, default: '09:00 AM' }
     },
     updatedBy: { type: MongooseSchema.Types.ObjectId, ref: 'User', default: null },
   },

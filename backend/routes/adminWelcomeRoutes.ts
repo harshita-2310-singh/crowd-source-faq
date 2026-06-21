@@ -11,7 +11,22 @@ import {
   updateOrientation,
   getOnboardingStatus,
   updateOnboardingStatus,
-  getOnboardingAuditLogs
+  getOnboardingAuditLogs,
+  getZoomSettings,
+  updateZoomSettings,
+  uploadZoomTranscript,
+  regenerateZoomAssessmentPool,
+  getZoomSessions,
+  createZoomSession,
+  updateZoomSession,
+  deleteZoomSession,
+  activateZoomSession,
+  uploadZoomSessionTranscript,
+  regenerateZoomSessionAssessmentPool,
+  getSessionQuestions,
+  createSessionQuestion,
+  updateSessionQuestion,
+  deleteSessionQuestion
 } from '../controllers/adminWelcomeController.js';
 import { adminOnly } from '../middleware/admin.js';
 import { protect } from '../middleware/auth.js';
@@ -37,6 +52,7 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+const uploadMemory = multer({ storage: multer.memoryStorage() });
 
 // All these routes require admin/moderator auth
 router.use(protect);
@@ -60,5 +76,26 @@ router.get('/onboarding-status', getOnboardingStatus);
 router.put('/onboarding-override/:userId', updateOnboardingStatus);
 // Audit Logs
 router.get('/audit-logs', getOnboardingAuditLogs);
+
+// Zoom Settings (Active session legacy adapters)
+router.get('/zoom-settings', getZoomSettings);
+router.put('/zoom-settings', updateZoomSettings);
+router.post('/zoom-settings/transcript', uploadMemory.single('transcript'), uploadZoomTranscript);
+router.post('/zoom-settings/regenerate', regenerateZoomAssessmentPool);
+
+// Zoom Onboarding Sessions CRUD
+router.get('/zoom-sessions', getZoomSessions);
+router.post('/zoom-sessions', createZoomSession);
+router.put('/zoom-sessions/:id', updateZoomSession);
+router.delete('/zoom-sessions/:id', deleteZoomSession);
+router.post('/zoom-sessions/:id/activate', activateZoomSession);
+router.post('/zoom-sessions/:id/transcript', uploadMemory.single('transcript'), uploadZoomSessionTranscript);
+router.post('/zoom-sessions/:id/regenerate', regenerateZoomSessionAssessmentPool);
+
+// Question Pool Management CRUD
+router.get('/zoom-sessions/:id/questions', getSessionQuestions);
+router.post('/zoom-sessions/:id/questions', createSessionQuestion);
+router.put('/zoom-sessions/:id/questions/:qId', updateSessionQuestion);
+router.delete('/zoom-sessions/:id/questions/:qId', deleteSessionQuestion);
 
 export default router;

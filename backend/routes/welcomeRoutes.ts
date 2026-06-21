@@ -11,6 +11,7 @@ import {
 import { protect } from '../middleware/auth.js';
 import TimelineStep from '../models/TimelineStep.js';
 import Mentor from '../models/Mentor.js';
+import { getAssessment, submitAssessment, getZoomStatus } from '../controllers/zoomAssessmentController.js';
 
 const router = express.Router();
 
@@ -27,6 +28,11 @@ router.post('/track', protect, trackWelcomeOnboarding);
 // Onboarding and Project Selection
 router.post('/orientation-complete', protect, completeOrientation);
 router.post('/select-project', protect, selectProject);
+
+// Zoom Assessment
+router.get('/zoom-assessment/status', protect, getZoomStatus);
+router.get('/zoom-assessment/questions', protect, getAssessment);
+router.post('/zoom-assessment/submit', protect, submitAssessment);
 
 // User-facing: get active timeline steps (ordered)
 router.get('/timeline-steps', protect, async (req, res) => {

@@ -29,8 +29,20 @@ const NAV: NavGroup[] = [
       { to: '/admin/auto-answer',    label: 'AI Answers',    icon: SparkleIcon },
       { to: '/admin/faq-audit',     label: 'FAQ Audit',     icon: StethoscopeIcon },
       { to: '/admin/unresolved-search', label: 'FAQ Gaps',    icon: SearchMissIcon },
+    ],
+  },
+  {
+    label: 'Community',
+    items: [
       { to: '/admin/community',      label: 'Community',     icon: ChatIcon },
       { to: '/admin/moderation',     label: 'Moderation',    icon: ShieldIcon },
+    ],
+  },
+  {
+    label: 'Zoom',
+    items: [
+      { to: '/admin/zoom',           label: 'Zoom Assessments', icon: VideoIcon },
+      { to: '/admin/zoom/questions', label: 'Zoom Questions',   icon: ListIcon },
     ],
   },
   {
@@ -49,7 +61,7 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    label: 'Community',
+    label: 'Members',
     items: [
       { to: '/admin/users',          label: 'Users',         icon: UsersIcon },
       { to: '/admin/leaderboard',    label: 'Leaderboard',   icon: TrophyIcon },

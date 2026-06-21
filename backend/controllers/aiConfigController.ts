@@ -147,6 +147,36 @@ export const updateAiConfig = async (req: Request, res: Response): Promise<void>
       });
     }
 
+    // Validate provider models
+    if (providers && typeof providers === 'object') {
+      for (const prov of ['anthropic', 'openai', 'xai', 'minimax', 'gemini', 'custom'] as AIProviderType[]) {
+        const update = providers[prov];
+        if (!update || update.model === undefined) continue;
+        const validation = validateModelForProvider(update.model, prov);
+        if (!validation.isValid) {
+          res.status(400).json({ message: `Invalid model for provider ${prov}: ${validation.error}` });
+          return;
+        }
+      }
+    }
+
+    const targetProvider = activeProvider || config.activeProvider;
+    // Validate feature models
+    if (features && typeof features === 'object') {
+      for (const [feat, featConf] of Object.entries(features)) {
+        if (featConf && typeof featConf === 'object' && 'model' in featConf) {
+          const featModel = (featConf as any).model;
+          if (featModel) {
+            const validation = validateModelForProvider(featModel, targetProvider);
+            if (!validation.isValid) {
+              res.status(400).json({ message: `Invalid model for feature ${feat}: ${validation.error}` });
+              return;
+            }
+          }
+        }
+      }
+    }
+
     if (activeProvider !== undefined) config.activeProvider = activeProvider;
     if (features !== undefined) config.features = { ...config.features, ...features } as IAiConfig['features'];
 
@@ -225,7 +255,7 @@ export const getAiProviders = async (_req: Request, res: Response): Promise<void
     xai:       { label: 'xAI Grok',         defaultModel: 'grok-3',                    hasKey: false, configuredModel: 'grok-3' },
     minimax:   { label: 'MiniMax',          defaultModel: 'MiniMax-Text-01',           hasKey: false, configuredModel: 'MiniMax-Text-01' },
     gemini:    { label: 'Google Gemini',    defaultModel: 'gemini-1.5-flash',          hasKey: false, configuredModel: 'gemini-1.5-flash' },
-    custom:    { label: 'Custom Provider',  defaultModel: 'custom-model',              hasKey: false, configuredModel: 'custom-model' },
+    custom:    { label: 'Custom Provider',  defaultModel: '',                          hasKey: false, configuredModel: '' },
   };
 
   for (const key of Object.keys(providerMeta) as ProviderKey[]) {
@@ -295,6 +325,29 @@ export const revealApiKey = async (req: Request, res: Response): Promise<void> =
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+export function validateModelForProvider(model: string, provider: string): { isValid: boolean; error?: string } {
+  if (!model) {
+    return { isValid: true };
+  }
+  const lowerModel = model.toLowerCase();
+  if (provider === 'anthropic' && !lowerModel.includes('claude')) {
+    return { isValid: false, error: "Anthropic models must contain 'claude'." };
+  }
+  if (provider === 'openai' && !(lowerModel.includes('gpt') || lowerModel.includes('o1') || lowerModel.includes('o3'))) {
+    return { isValid: false, error: "OpenAI models must contain 'gpt', 'o1', or 'o3'." };
+  }
+  if (provider === 'xai' && !lowerModel.includes('grok')) {
+    return { isValid: false, error: "xAI models must contain 'grok'." };
+  }
+  if (provider === 'minimax' && !(lowerModel.includes('minimax') || lowerModel.includes('abab'))) {
+    return { isValid: false, error: "MiniMax models must contain 'minimax' or 'abab'." };
+  }
+  if (provider === 'gemini' && !lowerModel.includes('gemini')) {
+    return { isValid: false, error: "Gemini models must contain 'gemini'." };
+  }
+  return { isValid: true };
+}
 
 function envKeyName(p: AIProviderType): string {
   return { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', xai: 'XAI_API_KEY', minimax: 'MINIMAX_API_KEY', gemini: 'GEMINI_API_KEY', custom: 'CUSTOM_API_KEY' }[p];

@@ -200,7 +200,7 @@ export class AiClient {
       xai: 'grok-3',
       minimax: 'MiniMax-Text-01',
       gemini: 'gemini-1.5-flash',
-      custom: 'custom-model',
+      custom: '',
     };
     return defaults[this.provider];
   }
@@ -218,6 +218,7 @@ export class AiClient {
       temperature?: number;
       maxTokens?: number;
       model?: string;
+      batchId?: string;
     }
   ): Promise<AIResult> {
     if (process.env.NODE_ENV === 'test') {
@@ -277,10 +278,17 @@ export class AiClient {
       };
     }
 
-    const { resolveProviderAsync, getModelForProvider } = await import('../utils/ai/aiProvider.js');
+    const { resolveProviderAsync, getModelForProvider, resolveActiveAiConfig } = await import('../utils/ai/aiProvider.js');
     const { default: AiConfig } = await import('../models/AiConfig.js');
 
-    const dbConfig = await AiConfig.findOne({ isActive: true });
+    const batchId = overrides?.batchId ?? null;
+    const resolvedOverrides = await resolveActiveAiConfig(batchId);
+    let dbConfig = await AiConfig.findOne({ batchId: batchId || null, isActive: true });
+    // Fallback to global config if the batch-specific one is not found or is inactive
+    if (!dbConfig && batchId) {
+      dbConfig = await AiConfig.findOne({ batchId: null, isActive: true });
+    }
+
     const requestedProvider = dbConfig?.activeProvider ?? this.provider;
     const config = await resolveProviderAsync(requestedProvider);
 
@@ -289,8 +297,12 @@ export class AiClient {
     }
 
     const featureConfig = dbConfig?.features?.[feature];
-    const rawModel = overrides?.model ?? featureConfig?.model ?? config.model;
-    const model = getModelForProvider(rawModel, config.provider);
+    const rawModel = overrides?.model || featureConfig?.model || config.model;
+    const model = getModelForProvider(rawModel, config.provider, config.model);
+
+    if (!model) {
+      throw new Error(`No AI model configured for provider '${config.provider}'. Please configure a model in Admin Settings.`);
+    }
 
     const temperature = overrides?.temperature ?? featureConfig?.temperature ?? 0.3;
     const maxTokens = overrides?.maxTokens ?? featureConfig?.maxTokens ?? 1024;
@@ -303,6 +315,17 @@ export class AiClient {
     if (config.needsAnthropicVersion) {
       headers['anthropic-version'] = '2023-06-01';
     }
+
+    // Log configuration immediately before AI request
+    const apiKeySource = config.apiKey ? 'Admin Settings / DB' : 'Environment Variable / Default';
+    console.log('--- AI Request Configuration ---');
+    console.log('provider =', config.provider);
+    console.log('model =', model);
+    console.log('task =', feature);
+    console.log('apiKeyPresent =', !!config.apiKey);
+    console.log('apiKeySource =', apiKeySource);
+    console.log('baseUrl =', config.baseURL);
+    console.log('--------------------------------');
 
     const body: Record<string, unknown> = {
       model,

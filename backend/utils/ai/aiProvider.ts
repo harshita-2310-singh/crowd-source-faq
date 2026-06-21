@@ -67,14 +67,14 @@ function isValidProvider(p: string): p is AIProvider {
 /**
  * Map model names to resolved provider defaults in case of provider mismatch.
  */
-export function getModelForProvider(model: string, provider: AIProvider): string {
+export function getModelForProvider(model: string, provider: AIProvider, fallbackModel?: string): string {
   const defaults: Record<AIProvider, string> = {
     anthropic: 'claude-sonnet-4-20250514',
     openai: 'gpt-4o-mini',
     xai: 'grok-3',
     minimax: 'MiniMax-Text-01',
     gemini: 'gemini-1.5-flash',
-    custom: 'custom-model',
+    custom: '',
   };
 
   const lowerModel = model.toLowerCase();
@@ -86,7 +86,7 @@ export function getModelForProvider(model: string, provider: AIProvider): string
   else if (lowerModel.includes('gemini')) modelProvider = 'gemini';
 
   if (modelProvider && modelProvider !== provider) {
-    return defaults[provider];
+    return fallbackModel || defaults[provider];
   }
   return model;
 }
@@ -145,12 +145,18 @@ export async function getPipelineProviderConfig(
   }[provider];
   const apiKey = (db[provider].apiKey || process.env[keyEnv] || '') as string;
   const baseURL = db[provider].baseURL || envBaseUrl(provider);
+
+  const resolvedModel = getModelForProvider(model, provider, db[provider].model);
+  if (!resolvedModel) {
+    throw new Error(`No AI model configured for provider '${provider}' on pipeline '${pipeline}'. Please configure a model in Admin Settings.`);
+  }
+
   return {
     ...PROVIDER_DEFAULTS[provider],
     provider,
     apiKey,
     baseURL,
-    model: getModelForProvider(model, provider),
+    model: resolvedModel,
   };
 }
 
@@ -187,7 +193,7 @@ const DEFAULT_MODELS: Record<AIProvider, string> = {
   xai: 'grok-3',
   minimax: 'MiniMax-Text-01',
   gemini: 'gemini-1.5-flash',
-  custom: 'custom-model',
+  custom: '',
 };
 
 const ENV_KEY: Record<AIProvider, string> = {
@@ -284,7 +290,7 @@ export async function resolveActiveAiConfig(batchId: string | null = null): Prom
 // resolution path is the global default, matching the prior
 // behaviour. The cache key is __global__ so per-program lookups
 // (added below) have a separate cache slot.
-async function loadDbOverrides(): Promise<DbOverrides> {
+export async function loadDbOverrides(): Promise<DbOverrides> {
   const resolved = await resolveActiveAiConfig(null);
   if (resolved) {
     _cache = { value: resolved, expiresAt: Date.now() + CACHE_TTL_MS };
@@ -330,6 +336,8 @@ export async function resolveProviderAsync(provider?: AIProvider): Promise<Provi
     else if (hasKey('openai')) chosen = 'openai';
     else if (hasKey('xai')) chosen = 'xai';
     else if (hasKey('minimax')) chosen = 'minimax';
+    else if (hasKey('gemini')) chosen = 'gemini';
+    else if (hasKey('custom')) chosen = 'custom';
     else {
       chosen = provider || 'minimax';
     }
@@ -338,7 +346,11 @@ export async function resolveProviderAsync(provider?: AIProvider): Promise<Provi
   const override = db[chosen];
   const apiKey = override.apiKey || process.env[ENV_KEY[chosen]] || '';
   const baseURL = (override.baseURL || process.env[ENV_BASE_URL[chosen]] || DEFAULT_BASE_URLS[chosen]).replace(/\/$/, '');
-  const model = getModelForProvider(override.model || process.env[ENV_MODEL[chosen]] || DEFAULT_MODELS[chosen], chosen);
+  const model = getModelForProvider(override.model || process.env[ENV_MODEL[chosen]] || DEFAULT_MODELS[chosen], chosen, override.model);
+
+  if (!model) {
+    throw new Error(`No AI model configured for provider '${chosen}'. Please configure a model in Admin Settings.`);
+  }
 
   return {
     ...PROVIDER_DEFAULTS[chosen],

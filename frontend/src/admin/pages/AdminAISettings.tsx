@@ -18,12 +18,60 @@ interface AiConfig {
 }
 
 const PROVIDER_META = {
-  anthropic: { label: 'Anthropic Claude', description: 'Best for complex reasoning and analysis',       defaultModel: 'claude-sonnet-4-20250514',       defaultBaseURL: 'https://api.anthropic.com/v1',                            docsUrl: 'https://console.anthropic.com/settings/keys',  badgeColor: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
-  openai:    { label: 'OpenAI GPT',       description: 'Fast, cost-effective for most tasks',            defaultModel: 'gpt-4o-mini',                    defaultBaseURL: 'https://api.openai.com/v1',                               docsUrl: 'https://platform.openai.com/api-keys',         badgeColor: 'bg-success/10 text-success border-success/20' },
-  xai:       { label: 'xAI Grok',         description: 'Strong reasoning with real-time data access',   defaultModel: 'grok-3',                         defaultBaseURL: 'https://api.x.ai/v1',                                     docsUrl: 'https://console.x.ai/',                        badgeColor: 'bg-warning/10 text-warning border-warning/20' },
-  minimax:   { label: 'MiniMax',           description: 'Cost-effective multilingual support',            defaultModel: 'MiniMax-Text-01',                defaultBaseURL: 'https://api.minimax.io/v1',                               docsUrl: 'https://platform.minimax.io',                  badgeColor: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-  gemini:    { label: 'Google Gemini',     description: 'Highly capable, cost-efficient reasoning',      defaultModel: 'gemini-1.5-flash',               defaultBaseURL: 'https://generativelanguage.googleapis.com/v1beta/openai', docsUrl: 'https://aistudio.google.com/app/apikey',       badgeColor: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
-  custom:    { label: 'Custom Provider',   description: 'Any self-hosted or OpenAI-compatible endpoint', defaultModel: 'custom-model',                   defaultBaseURL: 'http://localhost:11434/v1',                               docsUrl: 'https://github.com/ollama/ollama',             badgeColor: 'bg-border/60 text-ink-soft border-border' },
+  anthropic: {
+    label: 'Anthropic Claude',
+    description: 'Best for complex reasoning and analysis',
+    defaultModel: 'claude-sonnet-4-20250514',
+    defaultBaseURL: 'https://api.anthropic.com/v1',
+    docsUrl: 'https://console.anthropic.com/settings/keys',
+    badgeColor: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    suggestedModels: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest', 'claude-3-opus-20240229', 'claude-sonnet-4-20250514']
+  },
+  openai:    {
+    label: 'OpenAI GPT',
+    description: 'Fast, cost-effective for most tasks',
+    defaultModel: 'gpt-4o-mini',
+    defaultBaseURL: 'https://api.openai.com/v1',
+    docsUrl: 'https://platform.openai.com/api-keys',
+    badgeColor: 'bg-success/10 text-success border-success/20',
+    suggestedModels: ['gpt-4o-mini', 'gpt-4o', 'o1-mini', 'o1-preview']
+  },
+  xai:       {
+    label: 'xAI Grok',
+    description: 'Strong reasoning with real-time data access',
+    defaultModel: 'grok-3',
+    defaultBaseURL: 'https://api.x.ai/v1',
+    docsUrl: 'https://console.x.ai/',
+    badgeColor: 'bg-warning/10 text-warning border-warning/20',
+    suggestedModels: ['grok-3', 'grok-2-1212', 'grok-2', 'grok-beta']
+  },
+  minimax:   {
+    label: 'MiniMax',
+    description: 'Cost-effective multilingual support',
+    defaultModel: 'MiniMax-Text-01',
+    defaultBaseURL: 'https://api.minimax.io/v1',
+    docsUrl: 'https://platform.minimax.io',
+    badgeColor: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    suggestedModels: ['MiniMax-Text-01', 'abab6.5g', 'abab6.5-chat']
+  },
+  gemini:    {
+    label: 'Google Gemini',
+    description: 'Highly capable, cost-efficient reasoning',
+    defaultModel: 'gemini-1.5-flash',
+    defaultBaseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    docsUrl: 'https://aistudio.google.com/app/apikey',
+    badgeColor: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+    suggestedModels: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']
+  },
+  custom:    {
+    label: 'Custom Provider',
+    description: 'Any self-hosted or OpenAI-compatible endpoint',
+    defaultModel: '',
+    defaultBaseURL: 'http://localhost:11434/v1',
+    docsUrl: 'https://github.com/ollama/ollama',
+    badgeColor: 'bg-border/60 text-ink-soft border-border',
+    suggestedModels: ['llama-3.3-70b-versatile', 'llama3', 'mistral', 'mixtral']
+  },
 } as const;
 
 const FEATURE_LABELS: Record<keyof AiConfig['features'], string> = {
@@ -112,7 +160,7 @@ export default function AdminAISettings() {
       await adminApi.patch('/admin/ai/config', { features, batchId: activeBatchId ?? null });
       setSuccess('AI feature settings saved.'); setHasChanges(false); loadConfig(); setTimeout(() => setSuccess(''), 3000);
     }
-    catch { setError('Failed to save settings.'); }
+    catch (err: any) { setError(err.response?.data?.message || 'Failed to save settings.'); }
     finally { setSaving(false); }
   };
 
@@ -330,7 +378,12 @@ export default function AdminAISettings() {
                 {/* Model */}
                 <div>
                   <label className="block text-[10px] font-semibold text-ink-faint uppercase mb-1">Default Model <span className="text-[9px] font-normal">(optional)</span></label>
-                  <input type="text" value={draft.model} onChange={e => setProviderDrafts(prev => ({ ...prev, [provider]: { ...prev[provider], model: e.target.value } }))} placeholder={meta.defaultModel} className={monoInput} />
+                  <input type="text" list={`suggested-models-${provider}`} value={draft.model} onChange={e => setProviderDrafts(prev => ({ ...prev, [provider]: { ...prev[provider], model: e.target.value } }))} placeholder={meta.defaultModel} className={monoInput} />
+                  <datalist id={`suggested-models-${provider}`}>
+                    {meta.suggestedModels.map(m => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
                 </div>
 
                 <div className="flex justify-end pt-1">
@@ -392,7 +445,12 @@ export default function AdminAISettings() {
                   <div className={`grid grid-cols-3 gap-3 ${f.enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
                     <div>
                       <label className="block text-[10px] font-semibold text-ink-faint uppercase mb-1">Model</label>
-                      <input type="text" value={f.model} onChange={e => handleModelChange(feature, e.target.value)} className="admin-input text-xs" />
+                      <input type="text" list={`feature-suggested-models-${activeProvider}`} value={f.model} onChange={e => handleModelChange(feature, e.target.value)} className="admin-input text-xs" />
+                      <datalist id={`feature-suggested-models-${activeProvider}`}>
+                        {PROVIDER_META[activeProvider as ProviderKey]?.suggestedModels.map(m => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
                     </div>
                     <div>
                       <label className="block text-[10px] font-semibold text-ink-faint uppercase mb-1">Temperature <span className="text-[9px] font-normal">(0–1)</span></label>

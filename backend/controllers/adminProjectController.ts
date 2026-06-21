@@ -13,12 +13,12 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
 export const createProject = async (req: Request, res: Response): Promise<void> => {
   try {
     const { 
-      projectName, description, mentorName, mentorEmail, status, resources, skills,
+      projectName, description, mentorName, mentorEmail, mentor, status, resources, skills,
       problemStatement, whyMatters, outcomes, difficulty, weeklyCommitment, techStack, deliverables, teamSize, capacity
     } = req.body;
     
-    if (!projectName || !mentorName) {
-      res.status(400).json({ message: 'projectName and mentorName are required' });
+    if (!projectName || (!mentorName && !mentor)) {
+      res.status(400).json({ message: 'Project name and a mentor are required' });
       return;
     }
 
@@ -27,6 +27,7 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
       description: description || '',
       mentorName,
       mentorEmail,
+      mentor,
       status: status || 'active',
       resources: resources || [],
       skills: skills || [],
@@ -52,7 +53,7 @@ export const updateProject = async (req: Request, res: Response): Promise<void> 
   try {
     const { id } = req.params;
     const { 
-      projectName, description, mentorName, mentorEmail, status, resources, skills,
+      projectName, description, mentorName, mentorEmail, mentor, status, resources, skills,
       problemStatement, whyMatters, outcomes, difficulty, weeklyCommitment, techStack, deliverables, teamSize, capacity
     } = req.body;
 
@@ -66,6 +67,7 @@ export const updateProject = async (req: Request, res: Response): Promise<void> 
     if (description !== undefined) project.description = description;
     if (mentorName !== undefined) project.mentorName = mentorName;
     if (mentorEmail !== undefined) project.mentorEmail = mentorEmail;
+    if (mentor !== undefined) project.mentor = mentor;
     if (status !== undefined) project.status = status;
     if (resources !== undefined) project.resources = resources;
     if (skills !== undefined) project.skills = skills;
