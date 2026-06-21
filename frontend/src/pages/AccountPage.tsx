@@ -45,6 +45,25 @@ export default function AccountPage() {
   const transcriptRef = useRef<HTMLInputElement>(null);
   const transcriptPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // v1.70 — fix #8: client-side upload size validation. The file
+  // picker accepted files of any size; a 50MB upload would be POSTed
+  // in full before the backend's multer limit kicked in (25 MB for
+  // docs, 5 MB for Zoom transcripts). Validating up-front avoids the
+  // wasted bandwidth + clearer error than "Request failed".
+  // Limits mirror the backend multer caps exactly so a "passes here
+  // but fails server-side" mismatch is impossible.
+  const MAX_DOC_UPLOAD_BYTES = 25 * 1024 * 1024;     // backend: documentController.ts:52
+  const MAX_TRANSCRIPT_UPLOAD_BYTES = 5 * 1024 * 1024; // backend: routes/zoom.ts:31
+  function formatMB(bytes: number): string {
+    return (bytes / (1024 * 1024)).toFixed(1);
+  }
+  function validateUploadSize(file: File, maxBytes: number, label: string): string | null {
+    if (file.size > maxBytes) {
+      return `${label} is ${formatMB(file.size)} MB — exceeds the ${formatMB(maxBytes)} MB limit. Pick a smaller file.`;
+    }
+    return null;
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('zoom_connected') === '1') {
@@ -198,6 +217,8 @@ export default function AccountPage() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    const err = validateUploadSize(file, MAX_DOC_UPLOAD_BYTES, 'Document file');
+    if (err) { setDocMsg({ type: 'err', text: err }); setDocUploading(false); return; }
     setDocMsg(null);
     setDocUploading(true);
 
@@ -414,6 +435,8 @@ export default function AccountPage() {
                           const file = e.target.files?.[0];
                           e.target.value = '';
                           if (!file) return;
+                          const err = validateUploadSize(file, MAX_TRANSCRIPT_UPLOAD_BYTES, 'VTT file');
+                          if (err) { setTranscriptMsg({ type: 'err', text: err }); return; }
                           setTranscriptSelectedFile({ file, type: 'vtt' });
                           setTranscriptMsg(null);
                         }}
@@ -438,6 +461,8 @@ export default function AccountPage() {
                           const file = e.target.files?.[0];
                           e.target.value = '';
                           if (!file) return;
+                          const err = validateUploadSize(file, MAX_TRANSCRIPT_UPLOAD_BYTES, 'TXT file');
+                          if (err) { setTranscriptMsg({ type: 'err', text: err }); return; }
                           setTranscriptSelectedFile({ file, type: 'txt' });
                           setTranscriptMsg(null);
                         }}
