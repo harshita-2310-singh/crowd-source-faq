@@ -23,7 +23,7 @@ import { sanitizeHtml } from '../../utils/http/sanitize.js';
 // v1.68 — L1: communityLog replaces the bare `logger` so all
 // post/comment/upvote log lines carry the [community] tag.
 import { communityLog } from '../../utils/http/logger.js';
-import { checkDuplicate } from './post-duplicate.controller.js';
+import { evaluateDuplicates, isBlockingMatch } from './post-duplicate.controller.js';
 import { assertCanCreateContent } from '../../utils/banUtils.js';
 
 // POST /api/community — Create a new post (protected)
@@ -55,10 +55,19 @@ export const createPost = async (req: Request, res: Response): Promise<void> => 
       : [];
 
     // ── Server-side duplicate check ──────────────────────────────────────────
-    const words = title.trim().split(' ').filter((w) => w.length >= 3);
-    const isShortQuery = words.length < 3;
-    const matches = await checkDuplicate(title, isShortQuery);
-    if (matches.length > 0) {
+    // Uses the SAME AI-aware evaluator as the frontend's /check-duplicate
+    // pre-check, so server enforcement is consistent with what the user
+    // saw in the dialog. Only HIGH-CONFIDENCE FAQ matches (score >= 0.85)
+    // block submission; community/knowledge matches and AI returns below the
+    // FAQ-block threshold are informational only — the user already saw the
+    // suggestion banner and chose to proceed. Failing open on AI errors
+    // (detectDuplicatesWithAI returns [] on throw) keeps the server usable
+    // when the AI provider is down.
+    const matches = await evaluateDuplicates(
+      title,
+      req.programContext?.batchId ?? null,
+    );
+    if (matches.some(isBlockingMatch)) {
       res.status(409).json({
         message: 'This question has already been asked by the universe. Try searching first.',
         matches,

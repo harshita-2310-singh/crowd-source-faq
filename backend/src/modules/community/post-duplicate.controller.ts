@@ -28,6 +28,23 @@ export const DUPLICATE_VECTOR_THRESHOLD = 0.85;
 export const DUPLICATE_TEXT_THRESHOLD = 0.50;
 export const DUPLICATE_SHORT_QUERY_THRESHOLD = 0.90;
 
+/**
+ * Minimum score for a FAQ match to block post submission.
+ *
+ * Mirrors the frontend rule in `CreatePostDialog.tsx`:
+ *   `matches.some(m => m.source === 'faq' && m.score >= 0.85)`
+ *
+ * Community and knowledge matches NEVER block — they appear as suggestions
+ * only. This keeps server-side enforcement consistent with what the user
+ * saw in the pre-check: if the frontend allowed submit, the backend agrees.
+ */
+export const DUPLICATE_FAQ_BLOCK_THRESHOLD = 0.85;
+
+/** Whether a match should block post submission. See DUPLICATE_FAQ_BLOCK_THRESHOLD. */
+export function isBlockingMatch(m: DuplicateMatch): boolean {
+  return m.source === 'faq' && m.score >= DUPLICATE_FAQ_BLOCK_THRESHOLD;
+}
+
 // ─── Stop words & generic terms ────────────────────────────────────────────────
 
 const STOP_WORDS = new Set([
@@ -249,6 +266,91 @@ export async function checkDuplicate(
   return matches.sort((a, b) => b.score - a.score).slice(0, 5);
 }
 
+// ─── Shared AI-aware evaluator ─────────────────────────────────────────────────
+
+/**
+ * AI-aware duplicate evaluation. Used by BOTH the `/check-duplicate` route
+ * handler and the `createPost` server-side check, so server enforcement
+ * matches the frontend pre-check exactly.
+ *
+ * Architecture: when ANY AI provider is configured, the AI is the SOLE
+ * evaluator. Its verdict is final — no knowledge base mixing, no keyword
+ * fallback. The AI returns nothing if the question is genuinely novel.
+ *
+ * KB + keyword heuristics are only used when no AI provider is configured
+ * (server running with no API keys at all). This keeps the AI's judgment
+ * uncontested and prevents low-quality KB noise from polluting results
+ * the AI has already evaluated.
+ *
+ * Edge cases handled:
+ *  - AI configured + returns matches → caller decides blocking (see isBlockingMatch)
+ *  - AI configured + returns []      → no duplicates, submission allowed
+ *  - AI configured + throws/times out → caught by detectDuplicatesWithAI → returns []
+ *  - No AI + KB returns matches    → caller decides blocking
+ *  - No AI + KB empty + keyword fallback → caller decides blocking
+ *  - batchId threads to keyword fallback only (AI is not yet program-scoped,
+ *    per v1.69 Phase 3f comment in checkDuplicateController)
+ */
+export async function evaluateDuplicates(
+  query: string,
+  batchId: string | null = null,
+): Promise<DuplicateMatch[]> {
+  let aiAvailable = false;
+  try {
+    await resolveProviderAsync();
+    aiAvailable = true;
+  } catch {
+    aiAvailable = false;
+  }
+
+  let matches: DuplicateMatch[] = [];
+
+  if (aiAvailable) {
+    matches = await detectDuplicatesWithAI(query);
+  } else {
+    // No AI configured — use knowledge base + keyword fallback
+    try {
+      const { searchKnowledge } = await import('../knowledge/knowledge-base.service.js');
+      const knowledgeMatches = await searchKnowledge(query, 3);
+      for (const km of knowledgeMatches) {
+        if (km.score < 0.50) continue;
+        matches.push({
+          _id: km._id,
+          title: km.question,
+          question: km.question,
+          answer: km.answer,
+          source: 'knowledge' as const,
+          sourceTitle: km.sourceTitle,
+          score: km.score,
+          confidence: km.confidence,
+          reason: km.reason ?? `From ${km.source}: ${km.answer}`,
+          matchType: 'ai' as const,
+        });
+      }
+    } catch (err) {
+      communityLog.warn(`[checkDuplicate] knowledge search failed: ${(err as Error).message}`);
+    }
+
+    // Keyword heuristics if knowledge base is also empty
+    if (matches.length === 0) {
+      const words = query.split(' ').filter((w) => w.length >= 3);
+      const isShortQuery = words.length < 3;
+      matches = await checkDuplicate(query, isShortQuery, batchId);
+    }
+  }
+
+  // Sort + dedupe by _id, return top 5
+  const seen = new Set<string>();
+  const deduped: DuplicateMatch[] = [];
+  for (const m of matches.sort((a, b) => b.score - a.score)) {
+    if (!seen.has(m._id)) {
+      seen.add(m._id);
+      deduped.push(m);
+    }
+  }
+  return deduped.slice(0, 5);
+}
+
 // ─── Route handler ─────────────────────────────────────────────────────────────
 
 // POST /api/community/check-duplicate
@@ -268,78 +370,12 @@ export const checkDuplicateController = async (
     }
 
     const q = query.trim();
-
-    // Architecture: when ANY AI provider is configured, the AI is the SOLE
-    // evaluator. Its verdict is final — no knowledge base mixing, no keyword
-    // fallback. The AI returns nothing if the question is genuinely novel.
-    //
-    // KB + keyword heuristics are only used when no AI provider is configured
-    // (server running with no API keys at all). This keeps the AI's judgment
-    // uncontested and prevents low-quality KB noise from polluting results
-    // the AI has already evaluated.
-    let aiAvailable = false;
-    try {
-      await resolveProviderAsync();
-      aiAvailable = true;
-    } catch {
-      aiAvailable = false;
-    }
-
-    let matches: DuplicateMatch[] = [];
-
-    if (aiAvailable) {
-      // AI is the evaluator. Trust its verdict.
-      // v1.69 — Phase 3f: AI duplicate detection itself is not
-      // yet program-scoped (the AI's getVectorCandidates is a
-      // deeper refactor — Phase 4+). The caller still threads
-      // batchId so the keyword fallback below is scoped.
-      matches = await detectDuplicatesWithAI(q);
-    } else {
-      // No AI configured — use knowledge base + keyword fallback
-      try {
-        const { searchKnowledge } = await import('../knowledge/knowledge-base.service.js');
-        const knowledgeMatches = await searchKnowledge(q, 3);
-        for (const km of knowledgeMatches) {
-          if (km.score < 0.50) continue;
-          matches.push({
-            _id: km._id,
-            title: km.question,
-            question: km.question,
-            answer: km.answer,
-            source: 'knowledge' as const,
-            sourceTitle: km.sourceTitle,
-            score: km.score,
-            confidence: km.confidence,
-            reason: km.reason ?? `From ${km.source}: ${km.answer}`,
-            matchType: 'ai' as const,
-          });
-        }
-      } catch (err) {
-        communityLog.warn(`[checkDuplicate] knowledge search failed: ${(err as Error).message}`);
-      }
-
-      // Keyword heuristics if knowledge base is also empty
-      if (matches.length === 0) {
-        const words = q.split(' ').filter((w) => w.length >= 3);
-        const isShortQuery = words.length < 3;
-        matches = await checkDuplicate(q, isShortQuery, req.programContext?.batchId ?? null);
-      }
-    }
-
-    // Sort and dedupe
-    const seen = new Set<string>();
-    const deduped: DuplicateMatch[] = [];
-    for (const m of matches.sort((a, b) => b.score - a.score)) {
-      if (!seen.has(m._id)) {
-        seen.add(m._id);
-        deduped.push(m);
-      }
-    }
+    const matches = await evaluateDuplicates(q, req.programContext?.batchId ?? null);
 
     res.json({
-      isDuplicate: deduped.length > 0,
-      matches: deduped.slice(0, 5),
-      matchCount: deduped.length,
+      isDuplicate: matches.length > 0,
+      matches,
+      matchCount: matches.length,
     });
   } catch (error) {
     res.status(500).json({ message: 'Duplicate check failed' });
