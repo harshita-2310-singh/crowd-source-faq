@@ -5,8 +5,7 @@ on:
 
 env:
   INFISICAL_ENVIRONMENT: prod
-  INFISICAL_SECRET_PATH: csfaq/
-  INFISICAL_API_URL: https://app.infisical.com
+  INFISICAL_SECRET_PATH: /
 
 jobs:
   deploy:
@@ -32,11 +31,22 @@ jobs:
             echo "==> Pulling latest code..."
             git pull origin main
 
+            echo "==> Authenticating with Infisical..."
+            export INFISICAL_TOKEN=$(npx @infisical/cli@0.43.40 login \
+              --method=universal-auth \
+              --client-id="${{ secrets.INFISICAL_CLIENT_ID }}" \
+              --client-secret="${{ secrets.INFISICAL_CLIENT_SECRET }}" \
+              --silent \
+              --plain)
+
+            if [ -z "$INFISICAL_TOKEN" ]; then
+              echo "Infisical authentication failed"
+              exit 1
+            fi
+
             echo "==> Writing backend .env from Infisical..."
-            export INFISICAL_API_URL="${{ env.INFISICAL_API_URL }}"
-            export INFISICAL_TOKEN="${{ secrets.INFISICAL_TOKEN }}"
             npx @infisical/cli@0.43.40 export \
-              --token="${{ secrets.INFISICAL_TOKEN }}" \
+              --token="$INFISICAL_TOKEN" \
               --projectId="${{ secrets.INFISICAL_PROJECT_ID }}" \
               --env="${{ env.INFISICAL_ENVIRONMENT }}" \
               --path="${{ env.INFISICAL_SECRET_PATH }}" \
