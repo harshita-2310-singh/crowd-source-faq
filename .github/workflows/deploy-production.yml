@@ -68,6 +68,9 @@ jobs:
             PRE_LINES=$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)
             echo "    Pre-restart lines: $PRE_LINES"
 
+            echo "==> Printing systemd service configuration..."
+            cat /etc/systemd/system/csfaq.service || true
+
             echo "==> Restarting csfaq service..."
             sudo systemctl restart csfaq.service
 
