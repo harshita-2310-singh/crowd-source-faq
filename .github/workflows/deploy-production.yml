@@ -71,6 +71,6 @@ jobs:
 
             echo "==> Deployment complete."
 
-            echo "==> Showing last 100 lines of csfaq service logs..."
-            sudo journalctl -u csfaq.service -n 100 --no-pager
+            echo "==> Showing last 100 lines of application logs..."
+            tail -n 100 logs/main_log.txt || true
           DEPLOY
