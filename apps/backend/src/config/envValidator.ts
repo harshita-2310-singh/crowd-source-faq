@@ -107,6 +107,19 @@ export function validateEnv(): void {
     process.exit(1);
   }
 
+  // v1.71 — Soft warning when no Redis TCP URL is configured in prod.
+  // The BullMQ document queue reads from config.redis.tcpUrl (sourced
+  // from REDIS_TCP_URL or, with the v1.71 fallback, REDIS_URL). If
+  // neither is set, the queue uses redis://127.0.0.1:6379, which doesn't
+  // exist on the prod VPS — produces ECONNREFUSED every ~2s, which
+  // spams Discord even with the throttle. Warn loudly so the next
+  // deploy logs the missing config immediately.
+  if (process.env.NODE_ENV === 'production'
+      && !process.env.REDIS_TCP_URL
+      && !process.env.REDIS_URL) {
+    logger.warn('[validateEnv] No REDIS_TCP_URL or REDIS_URL configured — document queue will use local Redis fallback (redis://127.0.0.1:6379), which is not running on prod. Expect document upload 503s.');
+  }
+
   // v1.71 — Fingerprint log on successful validation. Makes "did the
   // backend even start" instantly answerable from deploy logs without
   // needing to grep for individual env var names. Counts only, never

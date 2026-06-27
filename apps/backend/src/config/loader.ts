@@ -60,6 +60,18 @@ export function loadConfig(forceReload = false): AppConfig {
   const mergedRedis = merged.redis as Record<string, unknown>;
   if (process.env.REDIS_URL !== undefined) {
     mergedRedis.url = process.env.REDIS_URL;
+    // v1.71 — REDIS_URL is the Upstash REST URL. In some deploys
+    // (notably the current prod setup) the operator sets REDIS_URL
+    // + REDIS_TOKEN but forgets REDIS_TCP_URL — the env var the
+    // BullMQ document queue actually reads. Without this fallback,
+    // the queue silently uses redis://127.0.0.1:6379 (a non-existent
+    // local Redis in prod), produces ECONNREFUSED every ~2s, and
+    // spam-floods Discord even with the v1.71 throttle (one warn per
+    // 30s per message — still noisy). Accept REDIS_URL as the TCP
+    // source too: REDIS_TCP_URL wins if both are set.
+    if (!process.env.REDIS_TCP_URL) {
+      mergedRedis.tcpUrl = process.env.REDIS_URL;
+    }
   }
   if (process.env.REDIS_TOKEN !== undefined) {
     mergedRedis.token = process.env.REDIS_TOKEN;
