@@ -8,6 +8,7 @@
  */
 
 import mongoose, { Types } from 'mongoose';
+import OpenAI from 'openai';
 import AiConfig from '../../modules/ai/ai-config.model.js';
 import { getConfig } from '../../config/runtimeConfig.js';
 import { logger } from '../http/logger.js';
@@ -126,10 +127,9 @@ export async function getActiveEmbeddingConfig(batchId: string | null = null) {
     logger.warn(`[embeddings] Dynamic keys/URLs configuration resolution failed: ${(err as Error).message}`);
   }
 
-  // Legacy fallback if not found in 3-layer config
   if (!apiKey) {
     if (provider === 'openai' || provider === 'custom') {
-      apiKey = (process.env.EMBEDDING_API_KEY ?? '').trim();
+      apiKey = (process.env.EMBEDDING_API_KEY ?? '').trim() || 'ollama';
     } else if (provider === 'huggingface') {
       apiKey = (process.env.EMBEDDING_API_KEY ?? process.env.HUGGINGFACE_API_KEY ?? '').trim();
     }
@@ -216,56 +216,32 @@ async function callHfApiEmbedding(text: string, apiKey: string, model: string): 
 }
 
 /**
- * Call OpenAI or OpenAI-compatible embeddings API.
+ * Call OpenAI or OpenAI-compatible embeddings API using the official OpenAI SDK.
  */
 async function callOpenAiEmbedding(text: string, apiKey: string, model: string, baseURL: string, provider: string, dimensions?: number): Promise<number[]> {
-  if (!apiKey) {
-    throw new Error('API Key is required for OpenAI/Custom embedding provider');
+  const client = new OpenAI({
+    apiKey: apiKey || 'ollama',
+    baseURL: baseURL.replace(/\/$/, ''),
+  });
+
+  const body: Record<string, unknown> = {
+    model,
+    input: text,
+  };
+  
+  // Pass dimensions parameter only for openai provider's text-embedding-3 models
+  if (provider === 'openai' && dimensions && model.includes('text-embedding-3')) {
+    body.dimensions = dimensions;
   }
-  const base = baseURL.replace(/\/$/, '');
-  const url = `${base}/embeddings`;
 
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), HF_TIMEOUT_MS);
-
-  try {
-    const body: Record<string, unknown> = {
-      input: text,
-      model,
-    };
-    
-    // Pass dimensions parameter only for openai provider's text-embedding-3 models
-    if (provider === 'openai' && dimensions && model.includes('text-embedding-3')) {
-      body.dimensions = dimensions;
-    }
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    clearTimeout(t);
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '<body unreadable>');
-      throw new Error(`OpenAI-compatible Embedding API ${res.status}: ${errText}`);
-    }
-
-    const data = await res.json() as { data?: { embedding?: number[] }[] };
-    const vec = data.data?.[0]?.embedding;
-    if (!Array.isArray(vec)) {
-      throw new Error(`Embedding API returned unexpected shape: ${JSON.stringify(data).slice(0, 200)}`);
-    }
-
-    return normalizeL2(vec);
-  } catch (err) {
-    clearTimeout(t);
-    throw err;
+  const response = await client.embeddings.create(body as any);
+  
+  const vec = response.data[0]?.embedding;
+  if (!Array.isArray(vec)) {
+    throw new Error(`Embedding API returned unexpected shape: ${JSON.stringify(response).slice(0, 200)}`);
   }
+
+  return normalizeL2(vec);
 }
 
 function normalizeL2(vec: number[]): number[] {
