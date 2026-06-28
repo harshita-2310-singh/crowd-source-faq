@@ -15,7 +15,7 @@
 
 import { ZoomInsightType } from '../../modules/zoom/zoom-meeting.model.js';
 import { resolveProviderAsync } from '../../utils/ai/aiProvider.js';
-import { parseVTTWithSpeakers, extractSnippet, isEmptyTranscript, isEmptyFromSegments, TranscriptSegment } from './vttParser.js';
+import { parseVTTWithSpeakers, extractSnippet, isEmptyFromSegments, TranscriptSegment } from './vttParser.js';
 import { logger } from '../../utils/http/logger.js';
 
 export interface ExtractedItem {

@@ -61,7 +61,7 @@ export type ExtractedDocumentInsight = z.infer<typeof InsightSchema>;
 
 // ─── Prompts ─────────────────────────────────────────────────────────────────
 
-const PROMPT_VERSION = 'v1';
+const _PROMPT_VERSION = 'v1';
 
 const SYSTEM_PROMPT = `You are a precise knowledge-base analyst. Read the provided document text and extract anything that a user might later search for or ask about. Be generous: when in doubt, include it. The admin review queue will sort quality from there.
 

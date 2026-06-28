@@ -8,7 +8,6 @@
  */
 import mongoose from 'mongoose';
 import { setTimeout as delay } from 'node:timers/promises';
-import { adminLog } from '../../../utils/http/logger.js';
 import { loadConfig } from '../../../config/loader.js';
 
 export interface DiagnosticResult {

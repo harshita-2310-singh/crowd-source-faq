@@ -19,7 +19,7 @@ import mongoose from 'mongoose';
 import { ZoomMeeting, ZoomInsight } from './zoom-meeting.model.js';
 import User from '../auth/user.model.js';
 import { downloadTranscriptAsUser, getPastRecordings } from '../../integrations/zoom/zoomOAuth.js';
-import { parseVTT, parseVTTWithSpeakers, isEmptyTranscript, isEmptyFromSegments } from '../../integrations/zoom/vttParser.js';
+import { parseVTTWithSpeakers, isEmptyFromSegments } from '../../integrations/zoom/vttParser.js';
 import { processZoomMeetingForKnowledge } from '../knowledge/knowledge-base.service.js';
 import { extractInsightsFromTranscript } from '../../integrations/zoom/zoomExtractor.js';
 import { CircuitOpenError } from '../../utils/http/circuitBreaker.js';

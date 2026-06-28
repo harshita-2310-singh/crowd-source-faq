@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose, { Types } from 'mongoose';
 import SearchLog from './search-log.model.js';
-import { generateEmbedding, generateQueryEmbedding } from '../../utils/ai/embeddings.js';
+import { generateQueryEmbedding } from '../../utils/ai/embeddings.js';
 import { LRUCache } from 'lru-cache';
 import { httpLog } from '../../utils/http/logger.js';
 import { getCachedResults, setCachedResults } from '../../utils/http/cache.js';

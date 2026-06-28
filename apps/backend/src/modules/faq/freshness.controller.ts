@@ -428,7 +428,7 @@ export const dismissEscalatedFAQ = async (req: Request<{ id: string }>, res: Res
 export const runFreshnessCheck = async (): Promise<void> => {
   try {
     const seasonalDays = SEASONAL_DEFAULT;
-    const volatileDays  = VOLATILE_DEFAULT;
+    const _volatileDays  = VOLATILE_DEFAULT;
 
     // Find all non-evergreen, verified FAQs whose interval has expired
     const staleFAQs = await FAQ.find({

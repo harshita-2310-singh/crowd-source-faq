@@ -8,9 +8,9 @@ import CommunityPost from '../community/community-post.model.js';
 import Notification from '../notification/notification.model.js';
 import RevokedToken from './revoked-token.model.js';
 import RefreshToken from './refresh-token.model.js';
-import { registerSchema, loginSchema, changePasswordSchema } from '../../utils/auth/validation.js';
+import { registerSchema, loginSchema } from '../../utils/auth/validation.js';
 import { sanitizeHtml } from '../../utils/http/sanitize.js';
-import { logger, authLog, securityLog } from '../../utils/http/logger.js';
+import { authLog, securityLog } from '../../utils/http/logger.js';
 
 const hashToken = (token: string): string => {
   return crypto.createHash('sha256').update(token).digest('hex');

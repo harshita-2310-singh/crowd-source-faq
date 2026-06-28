@@ -23,7 +23,7 @@ import type { Request, Response } from 'express';
 import type { LifecycleStatus } from '../community/community-post.model.js';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const UPVOTE_THRESHOLD = parseInt(process.env['FAQ_PROMOTION_UPVOTE_THRESHOLD'] ?? '10');
+const _UPVOTE_THRESHOLD = parseInt(process.env['FAQ_PROMOTION_UPVOTE_THRESHOLD'] ?? '10');
 const REVIEW_WINDOW_HOURS = parseInt(process.env['FAQ_PROMOTION_REVIEW_WINDOW_HOURS'] ?? '24');
 
 // Stage 4 Community-Validation thresholds (per spec)
@@ -268,7 +268,7 @@ export async function promoteToAdminApproved(
   if (!faq) throw new Error('FAQ not found');
   if (faq.trustLevel === 'expert') throw new Error('FAQ is already at expert trust level');
 
-  const oldLevel = faq.trustLevel;
+  const _oldLevel = faq.trustLevel;
   faq.trustLevel = 'expert'; // expert = admin_approved
   if (!faq.promotionMetadata) faq.promotionMetadata = {} as any;
   const meta = faq.promotionMetadata!;

@@ -1,6 +1,6 @@
 import mongoose, { Types } from 'mongoose';
 import CommunityPost, { ICommunityPost } from './community-post.model.js';
-import { generateEmbedding, generateQueryEmbedding } from '../../utils/ai/embeddings.js';
+import { generateQueryEmbedding } from '../../utils/ai/embeddings.js';
 import { Request, Response } from 'express';
 import { computeRRF, applySearchThreshold, type SearchResultItem } from '../../utils/http/search.js';
 // v1.69 — Phase 3h: program-scope the community search.
