@@ -281,6 +281,35 @@ export default function CommunityPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {/* Ask a Question button */}
+            <button
+              id="ask-question-btn"
+              onClick={handleAskQuestion}
+              className="btn-community-ask"
+              aria-label="Ask a question"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <span>Ask a Question</span>
+            </button>
+
+            {/* Sync Content button */}
+            <button
+              onClick={handleSync}
+              className="h-9 px-3.5 rounded-xl border border-border bg-card flex items-center justify-center gap-1.5 text-xs text-ink-faint hover:text-ink hover:border-accent/30 transition-all disabled:opacity-50"
+              disabled={syncing}
+              aria-label="Sync community posts"
+            >
+              <svg className={`flex-shrink-0 transition-transform ${syncing ? 'animate-spin' : ''}`} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10"/>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
+              <span className="hidden sm:inline">Sync Content</span>
+              <span className="sm:hidden">Sync</span>
+            </button>
+
             {/* Share button */}
             <button
               onClick={handleShareCommunity}
@@ -294,20 +323,6 @@ export default function CommunityPage() {
                 <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
                 <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
               </svg>
-            </button>
-            {/* Sync Content button */}
-            <button
-              onClick={handleSync}
-              className="btn-community-ask"
-              disabled={syncing}
-              aria-label="Sync community posts"
-            >
-              <svg className={`flex-shrink-0 transition-transform ${syncing ? 'animate-spin' : ''}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 4 23 10 17 10"/>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-              </svg>
-              <span className="hidden sm:inline">Sync Content</span>
-              <span className="sm:hidden">Sync</span>
             </button>
           </div>
         </div>
