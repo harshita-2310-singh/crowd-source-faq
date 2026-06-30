@@ -48,20 +48,20 @@ export function createApp(config: any): Express {
       logger.warn(`[server] Health check DB ping failed: ${(err as Error).message}`);
       dbStatus = 'error';
     }
-    // v1.71 — surface Redis state too, so the deploy script (and humans)
-    // can distinguish "backend up, Redis down" from "backend down".
-    // Lazy-imported to avoid pulling Redis client code into the boot path.
-    let redisStatus = 'disabled';
+    // v1.71 — surface queue/cache state too, so the deploy script (and
+    // humans) can distinguish "backend up, queue down" from "backend down".
+    // Lazy-imported to avoid pulling queue code into the boot path.
+    let cacheStatus = 'unknown';
     try {
       const { cacheAvailable } = await import('../utils/http/cache.js');
-      redisStatus = cacheAvailable() ? 'connected' : 'unavailable';
+      cacheStatus = cacheAvailable() ? 'connected' : 'unavailable';
     } catch {
-      redisStatus = 'error';
+      cacheStatus = 'error';
     }
     res.json({
       status: dbStatus === 'connected' ? 'ok' : 'degraded',
       db: dbStatus,
-      redis: redisStatus,
+      cache: cacheStatus,
       version: '0.1.0',
     });
   });

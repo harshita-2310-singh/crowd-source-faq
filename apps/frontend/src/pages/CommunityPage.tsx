@@ -169,17 +169,16 @@ export default function CommunityPage() {
     }
   }, []);
 
+  // v2 — search is now Enter-only. We still keep the trimmed query handy
+  // for downstream effects (filter/sort re-apply on existing results).
+  // The auto-fire debounce was removed so results don't pop while the user
+  // is still typing.
   useEffect(() => {
     const q = search.trim();
     if (!q || q.length < 3) {
       setSearchResults([]);
-      return;
     }
-    const timer = setTimeout(() => {
-      runSemanticSearch(q);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [search, runSemanticSearch]);
+  }, [search]);
 
   // Show success toast when a manual sync completes
   useEffect(() => {

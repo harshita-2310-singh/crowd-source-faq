@@ -80,8 +80,8 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
           ? '100'
           : '0';
 
-    const { getDocumentQueueStatus } = await import('../../utils/jobs/documentQueue.js');
-    const documentQueueStatus = getDocumentQueueStatus();
+    const { getDocumentQueueStatusSync } = await import('../../utils/jobs/documentQueue.js');
+    const documentQueueStatus = getDocumentQueueStatusSync();
 
     res.json({
       totalFaqs,

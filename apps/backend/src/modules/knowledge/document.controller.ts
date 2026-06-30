@@ -99,7 +99,7 @@ function stripInsensitive(record: IDocumentRecord): Record<string, unknown> {
  */
 export async function uploadDocument(req: Request, res: Response): Promise<void> {
   if (!isDocumentQueueEnabled()) {
-    res.status(503).json({ message: 'Document processing is not configured on this server. Set REDIS_TCP_URL.' });
+    res.status(503).json({ message: 'Document processing is not configured on this server.' });
     return;
   }
   const userId = getAuthedUserId(req);
