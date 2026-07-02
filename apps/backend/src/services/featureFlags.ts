@@ -67,6 +67,20 @@ export const FEATURE_FLAGS = {
       'When disabled, drafts stop generating and existing drafts are not surfaced.',
     category: 'community',
   },
+  // v1.69 P1 — was an orphan flag in MongoDB (registry missing it).
+  // Mirrors communityAutoAnswer but applies to the AI suggestion path
+  // specifically (legacy row kept so the existing toggle history
+  // survives). Toggling communityAutoAnswer off still implies this off
+  // in callers — see support-core.controller.ts for the chain.
+  aiAutoAnswer: {
+    default: true,
+    label: 'AI Auto-Answer',
+    description:
+      'Enables AI-driven answer suggestions on community posts. When disabled, no AI ' +
+      'drafts are generated; existing drafts remain in their current state. Mirrors ' +
+      'communityAutoAnswer for backwards compatibility with legacy MongoDB rows.',
+    category: 'community',
+  },
   communityAutoAnswerFeedbackLoop: {
     default: true,
     label: 'Community Auto-Answer Feedback Loop',
