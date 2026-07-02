@@ -55,6 +55,7 @@ const AdminWelcomePage = lazy(() => import('../admin/pages/AdminWelcomePage'));
 const AdminZoomAssessmentsPage = lazy(() => import('../admin/pages/AdminZoomAssessmentsPage'));
 const AdminZoomQuestionsPage = lazy(() => import('../admin/pages/AdminZoomQuestionsPage'));
 const AdminProjectsPage = lazy(() => import('../admin/pages/AdminProjectsPage'));
+const AdminContextSources = lazy(() => import('../admin/pages/AdminContextSources'));
 const AdminSupportLayout = lazy(() => import('../admin/components/layout/AdminSupportLayout'));
 const AdminLayout = lazy(() => import('../admin/components/layout/AdminLayout'));
 
@@ -160,6 +161,7 @@ export default function AppRoutes() {
           <Route path="/admin/zoom" element={<AdminRoute><AdminLayout><AdminZoomAssessmentsPage /></AdminLayout></AdminRoute>} />
           <Route path="/admin/zoom/questions" element={<AdminRoute><AdminLayout><AdminZoomQuestionsPage /></AdminLayout></AdminRoute>} />
           <Route path="/admin/projects" element={<AdminRoute><AdminLayout><AdminProjectsPage /></AdminLayout></AdminRoute>} />
+          <Route path="/admin/context-sources" element={<AdminRoute><AdminLayout><AdminContextSources /></AdminLayout></AdminRoute>} />
           <Route path="/admin/auto-answer" element={<AdminRoute><AdminLayout><FeatureGate featureKey="aiAutoAnswer" featureLabel="AI Auto-Answer"><AdminAutoAnswerQueue /></FeatureGate></AdminLayout></AdminRoute>} />
           <Route path="/admin/faq-audit" element={<AdminRoute><AdminLayout><FeatureGate featureKey="faqFreshness" featureLabel="FAQ Freshness Audit"><AdminFAQAudit /></FeatureGate></AdminLayout></AdminRoute>} />
           <Route path="/admin/batches" element={<AdminRoute><AdminLayout><AdminBatches /></AdminLayout></AdminRoute>} />
