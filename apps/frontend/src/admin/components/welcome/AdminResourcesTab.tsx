@@ -189,7 +189,27 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
         // v1.70: SVG flowcharts upload directly to Cloudinary via the
         // signed-URL flow. We get back { url, publicId } and POST those
         // as plain JSON fields (not multipart).
-        const { url, publicId } = await uploadSvg(file!);
+        //
+        // The Cloudinary upload runs browser→Cloudinary (not via our
+        // backend), so a `TypeError: Failed to fetch` here is almost
+        // always a CSP block (helmet's `connect-src` doesn't allow
+        // api.cloudinary.com) — see apps/backend/src/bootstrap/middleware.ts.
+        // We map that to a friendly UI message instead of dumping the raw
+        // browser error onto the page.
+        let uploaded;
+        try {
+          uploaded = await uploadSvg(file!);
+        } catch (uploadErr) {
+          const msg = (uploadErr as Error).message;
+          if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+            setError(
+              'Upload blocked by browser security policy. Reload the page and retry, or contact an admin if it persists.'
+            );
+            return;
+          }
+          throw uploadErr;
+        }
+        const { url, publicId } = uploaded;
         await adminApi.post('/admin/welcome/resources', {
           kind: 'svg',
           title: title.trim(),
@@ -241,7 +261,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
   const handleToggleVisibility = async (r: Resource): Promise<void> => {
     try {
       await adminApi.put(`/admin/welcome/resources/${r._id}/visibility`, { visible: !r.visible });
-      setResources((prev) => prev.map((x) => (x._id === r._id ? { ...x, visible: !r.visible } : x)));
+      setResources((prev) =>
+        prev.map((x) => (x._id === r._id ? { ...x, visible: !r.visible } : x))
+      );
     } catch (err) {
       setError('Failed to toggle visibility.');
     }
@@ -250,41 +272,45 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
   // Drag-and-drop reorder — uses HTML5 DnD on the row handle.
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
-  const handleDragStart = (id: string) => (e: React.DragEvent): void => {
-    setDraggingId(id);
-    e.dataTransfer.effectAllowed = 'move';
-  };
+  const handleDragStart =
+    (id: string) =>
+    (e: React.DragEvent): void => {
+      setDraggingId(id);
+      e.dataTransfer.effectAllowed = 'move';
+    };
   const handleDragOver = (e: React.DragEvent): void => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   };
-  const handleDrop = (targetId: string) => async (e: React.DragEvent): Promise<void> => {
-    e.preventDefault();
-    if (!draggingId || draggingId === targetId) {
+  const handleDrop =
+    (targetId: string) =>
+    async (e: React.DragEvent): Promise<void> => {
+      e.preventDefault();
+      if (!draggingId || draggingId === targetId) {
+        setDraggingId(null);
+        return;
+      }
+      // Optimistic local reorder.
+      const reordered = [...resources];
+      const fromIdx = reordered.findIndex((r) => r._id === draggingId);
+      const toIdx = reordered.findIndex((r) => r._id === targetId);
+      if (fromIdx === -1 || toIdx === -1) return;
+      const [moved] = reordered.splice(fromIdx, 1);
+      reordered.splice(toIdx, 0, moved);
+      // Re-assign `order` 0..n.
+      const withNewOrder = reordered.map((r, i) => ({ ...r, order: i }));
+      setResources(withNewOrder);
       setDraggingId(null);
-      return;
-    }
-    // Optimistic local reorder.
-    const reordered = [...resources];
-    const fromIdx = reordered.findIndex((r) => r._id === draggingId);
-    const toIdx = reordered.findIndex((r) => r._id === targetId);
-    if (fromIdx === -1 || toIdx === -1) return;
-    const [moved] = reordered.splice(fromIdx, 1);
-    reordered.splice(toIdx, 0, moved);
-    // Re-assign `order` 0..n.
-    const withNewOrder = reordered.map((r, i) => ({ ...r, order: i }));
-    setResources(withNewOrder);
-    setDraggingId(null);
-    // Persist.
-    try {
-      await adminApi.put('/admin/welcome/resources/reorder', {
-        order: withNewOrder.map((r) => ({ id: r._id, order: r.order })),
-      });
-    } catch (err) {
-      setError('Failed to persist new order.');
-      await fetchAll();
-    }
-  };
+      // Persist.
+      try {
+        await adminApi.put('/admin/welcome/resources/reorder', {
+          order: withNewOrder.map((r) => ({ id: r._id, order: r.order })),
+        });
+      } catch (err) {
+        setError('Failed to persist new order.');
+        await fetchAll();
+      }
+    };
 
   const handleCreateKnowledge = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -350,7 +376,7 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
     try {
       const res = await adminApi.post<{ kind: GenKind; count: number; generated: string }>(
         `/admin/welcome/knowledge/${genSourceId}/generate`,
-        { kind: genKind, count: genCount },
+        { kind: genKind, count: genCount }
       );
       setGenOutput(res.data.generated || '');
     } catch (err) {
@@ -372,7 +398,7 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
 
   const sortedResources = useMemo(
     () => [...resources].sort((a, b) => a.order - b.order),
-    [resources],
+    [resources]
   );
 
   return (
@@ -387,9 +413,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
       <section className="bg-card border border-border rounded-xl p-6">
         <h2 className="text-lg font-bold text-ink mb-1">Add onboarding resource</h2>
         <p className="text-xs text-ink-soft mb-4">
-          Add PDFs, slides, flowcharts, markdown, transcripts, or external links alongside your existing
-          orientation video. Each kind tracks completion differently — video uses watch %, others use
-          time-on-page.
+          Add PDFs, slides, flowcharts, markdown, transcripts, or external links alongside your
+          existing orientation video. Each kind tracks completion differently — video uses watch %,
+          others use time-on-page.
         </p>
         <form onSubmit={handleCreate} className="space-y-4 max-w-3xl">
           <div>
@@ -511,7 +537,11 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
             disabled={busy || (kind === 'svg' && svgUploading)}
             className="px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50"
           >
-            {busy ? 'Adding…' : kind === 'svg' && svgUploading ? 'Uploading to Cloudinary…' : 'Add resource'}
+            {busy
+              ? 'Adding…'
+              : kind === 'svg' && svgUploading
+                ? 'Uploading to Cloudinary…'
+                : 'Add resource'}
           </button>
         </form>
       </section>
@@ -519,7 +549,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
       {/* ── Resource List ───────────────────────────────────────────── */}
       <section className="bg-card border border-border rounded-xl p-6">
         <h2 className="text-lg font-bold text-ink mb-1">Resources ({sortedResources.length})</h2>
-        <p className="text-xs text-ink-soft mb-4">Drag the handle to reorder. Click the eye to toggle visibility.</p>
+        <p className="text-xs text-ink-soft mb-4">
+          Drag the handle to reorder. Click the eye to toggle visibility.
+        </p>
         {loading && <p className="text-sm text-ink-soft">Loading…</p>}
         {!loading && sortedResources.length === 0 && (
           <p className="text-sm text-ink-soft">No resources yet. Add one above.</p>
@@ -533,7 +565,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
               onDragOver={handleDragOver}
               onDrop={handleDrop(r._id)}
               className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors ${
-                draggingId === r._id ? 'border-accent bg-accent/5' : 'border-border bg-bg/40 hover:bg-mist/30'
+                draggingId === r._id
+                  ? 'border-accent bg-accent/5'
+                  : 'border-border bg-bg/40 hover:bg-mist/30'
               }`}
             >
               <span className="cursor-grab text-ink-faint select-none">⠿</span>
@@ -547,7 +581,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
               </div>
               <button
                 type="button"
-                onClick={() => { void handleToggleVisibility(r); }}
+                onClick={() => {
+                  void handleToggleVisibility(r);
+                }}
                 title={r.visible ? 'Hide from students' : 'Show to students'}
                 className="px-2 py-1 text-xs rounded-md border border-border hover:bg-mist"
               >
@@ -555,7 +591,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
               </button>
               <button
                 type="button"
-                onClick={() => { void handleDelete(r._id); }}
+                onClick={() => {
+                  void handleDelete(r._id);
+                }}
                 className="px-2 py-1 text-xs rounded-md border border-border text-red-600 hover:bg-red-50"
               >
                 Delete
@@ -569,7 +607,8 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
       <section className="bg-card border border-border rounded-xl p-6">
         <h2 className="text-lg font-bold text-ink mb-1">Knowledge sources ({knowledge.length})</h2>
         <p className="text-xs text-ink-soft mb-4">
-          Indexed text the AI uses when students ask questions. Each source is chunked + embedded on save.
+          Indexed text the AI uses when students ask questions. Each source is chunked + embedded on
+          save.
         </p>
         <form onSubmit={handleCreateKnowledge} className="space-y-4 max-w-3xl">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -579,7 +618,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
               </label>
               <select
                 value={kKind}
-                onChange={(e) => setKKind(e.target.value as 'pasted' | 'transcript' | 'knowledge_base')}
+                onChange={(e) =>
+                  setKKind(e.target.value as 'pasted' | 'transcript' | 'knowledge_base')
+                }
                 className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-ink"
               >
                 <option value="pasted">Pasted text</option>
@@ -669,14 +710,18 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
                     type="button"
                     onClick={() => setGenSourceId(k._id)}
                     className={`px-2 py-1 text-xs rounded-md border ${
-                      genSourceId === k._id ? 'border-accent bg-accent/10 text-accent' : 'border-border hover:bg-mist'
+                      genSourceId === k._id
+                        ? 'border-accent bg-accent/10 text-accent'
+                        : 'border-border hover:bg-mist'
                     }`}
                   >
                     Use for AI
                   </button>
                   <button
                     type="button"
-                    onClick={() => { void handleDeleteKnowledge(k._id); }}
+                    onClick={() => {
+                      void handleDeleteKnowledge(k._id);
+                    }}
                     className="px-2 py-1 text-xs rounded-md border border-border text-red-600 hover:bg-red-50"
                   >
                     Delete
@@ -692,7 +737,8 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
       <section className="bg-card border border-border rounded-xl p-6">
         <h2 className="text-lg font-bold text-ink mb-1">AI generation tools</h2>
         <p className="text-xs text-ink-soft mb-4">
-          Generate FAQs, quizzes, summaries, timelines, or flashcards from an indexed knowledge source.
+          Generate FAQs, quizzes, summaries, timelines, or flashcards from an indexed knowledge
+          source.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
@@ -746,7 +792,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
         <div className="mt-4 flex items-center gap-2">
           <button
             type="button"
-            onClick={() => { void handleGenerate(); }}
+            onClick={() => {
+              void handleGenerate();
+            }}
             disabled={genBusy || !genSourceId}
             className="px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50"
           >
@@ -755,7 +803,9 @@ export default function AdminResourcesTab({ programId, refreshKey }: Props): Rea
           {genOutput && (
             <button
               type="button"
-              onClick={() => { void handleCopyGen(); }}
+              onClick={() => {
+                void handleCopyGen();
+              }}
               className="px-3 py-2 rounded-lg border border-border text-ink-soft hover:bg-mist text-xs"
             >
               Copy output

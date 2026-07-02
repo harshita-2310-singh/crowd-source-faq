@@ -18,8 +18,8 @@ import { useState, useCallback, useRef } from 'react';
 import api from '../utils/api';
 
 export interface CloudinarySvgAsset {
-  url: string;       // Cloudinary secure_url
-  publicId: string;  // Cloudinary public_id
+  url: string; // Cloudinary secure_url
+  publicId: string; // Cloudinary public_id
 }
 
 interface CloudinarySvgSignResponse {
@@ -70,6 +70,11 @@ export function useCloudinarySvgUpload() {
         const text = await cloudRes.text().catch(() => '');
         throw new Error(`Cloudinary upload failed (${cloudRes.status}): ${text.slice(0, 200)}`);
       }
+      // TypeError: Failed to fetch — almost always a CSP block, mixed-content
+      // (http page → https upload), network partition, or DNS failure. The
+      // most common case in this codebase is CSP `connect-src` not allowing
+      // api.cloudinary.com; the fix lives in
+      // apps/backend/src/bootstrap/middleware.ts (helmet CSP directives).
       const cloud = (await cloudRes.json()) as {
         secure_url: string;
         public_id: string;
