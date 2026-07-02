@@ -270,6 +270,46 @@ export const _exports = {
   getAutoAnswerQueuePaginated,
 };
 
-// Marker for static analysis — keep ProgramKnowledge import live so
-// model-load stays deterministic in tests that mock the controller.
-void ProgramKnowledge;
+/** GET /admin/auto-answer/:postId/context — returns the persisted aiContext snapshot */
+export const getAutoAnswerContext = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const postId = validatePostId(req.params.postId);
+  if (!postId) {
+    res.status(400).json({ message: 'invalid postId' });
+    return;
+  }
+  try {
+    const post = await CommunityPost.findById(postId)
+      .select(
+        'aiContext aiAnswerStatus aiAnswerConfidence aiAnswerSource lastAutoAnswerAt aiAnswerAttempts',
+      )
+      .lean();
+    if (!post) {
+      res.status(404).json({ message: 'post not found' });
+      return;
+    }
+    if (!post.aiContext) {
+      res.status(404).json({
+        message:
+          'no context snapshot — post has not been processed by auto-answer yet',
+      });
+      return;
+    }
+    res.json({
+      postId: String(postId),
+      snapshot: post.aiContext,
+      decision: {
+        aiAnswerStatus: post.aiAnswerStatus,
+        aiAnswerConfidence: post.aiAnswerConfidence,
+        aiAnswerSource: post.aiAnswerSource,
+        lastAutoAnswerAt: post.lastAutoAnswerAt,
+        aiAnswerAttempts: post.aiAnswerAttempts,
+      },
+    });
+  } catch (err) {
+    adminLog.warn(`[autoAnswer] context fetch failed: ${(err as Error).message}`);
+    res.status(500).json({ message: 'context fetch failed' });
+  }
+};

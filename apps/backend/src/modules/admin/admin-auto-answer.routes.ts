@@ -9,6 +9,7 @@
  * POST /admin/auto-answer/:postId/approve-edit     — Phase 3: set answer, write ProgramKnowledge admin_corrected
  * POST /admin/auto-answer/:postId/reject           — Phase 3: clear aiAnswer, status=rejected
  * POST /admin/auto-answer/:postId/ask-ai-again     — Phase 3: re-run pipeline with augmented context
+ * GET  /admin/auto-answer/:postId/context          — Phase 4: drill-down into persisted aiContext
  */
 import { Router } from 'express';
 import {
@@ -22,6 +23,7 @@ import {
   rejectAutoAnswer,
   askAiAgain,
   getAutoAnswerQueuePaginated,
+  getAutoAnswerContext,
 } from './adminAutoAnswerReview.controller.js';
 import { protect } from '../../middleware/auth.js';
 import { authorize } from '../../middleware/authShared.js';
@@ -42,5 +44,8 @@ router.post('/auto-answer/:postId/approve', approveAutoAnswer);
 router.post('/auto-answer/:postId/approve-edit', approveEditAutoAnswer);
 router.post('/auto-answer/:postId/reject', rejectAutoAnswer);
 router.post('/auto-answer/:postId/ask-ai-again', askAiAgain);
+
+// Phase 4 R12 — observability drill-down.
+router.get('/auto-answer/:postId/context', getAutoAnswerContext);
 
 export default router;
