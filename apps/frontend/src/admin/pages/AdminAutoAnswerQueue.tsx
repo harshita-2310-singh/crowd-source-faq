@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import adminApi from '../utils/adminApi';
 import { friendlyError } from '../../utils/api';
 import Badge from '../components/common/Badge';
+import InlinePrompt from '../components/common/InlinePrompt';
 
 type AiAnswerStatus =
   | 'pending'
@@ -140,30 +141,18 @@ function ActionButtons({
       >
         Approve + Edit
       </button>
-      <button
-        onClick={() => {
-          const reason = typeof window !== 'undefined'
-            ? window.prompt('Optional rejection reason (1 line):', '') ?? ''
-            : '';
-          onReject(reason);
-        }}
-        disabled={disabledAll}
-        className="text-[11px] px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/20 text-danger hover:bg-danger/20 transition-all disabled:opacity-50"
-      >
-        Reject
-      </button>
-      <button
-        onClick={() => {
-          const extra = typeof window !== 'undefined'
-            ? window.prompt('Optional extra context for the AI (1–2 sentences):', '') ?? ''
-            : '';
-          onAskAgain(extra);
-        }}
-        disabled={disabledAll}
-        className="text-[11px] px-3 py-1.5 rounded-lg bg-warning/10 border border-warning/20 text-warning hover:bg-warning/20 transition-all disabled:opacity-50"
-      >
-        Ask AI Again
-      </button>
+      <InlinePrompt
+        triggerLabel="Reject"
+        title="Optional rejection reason (1 line):"
+        confirmLabel="Reject"
+        onConfirm={(reason) => onReject(reason)}
+      />
+      <InlinePrompt
+        triggerLabel="Ask AI Again"
+        title="Optional extra context for the AI (1–2 sentences):"
+        confirmLabel="Ask"
+        onConfirm={(extra) => onAskAgain(extra)}
+      />
     </div>
   );
 }

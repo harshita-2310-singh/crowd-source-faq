@@ -212,9 +212,10 @@ export default function OrientationTab() {
     return <div className="text-center py-20 text-ink-soft">No active orientation found.</div>;
   }
 
-  const videoSource = orientation.videoUrl.startsWith('http') 
-    ? orientation.videoUrl 
-    : `http://localhost:6767${orientation.videoUrl}`;
+  const API_BASE = import.meta.env.VITE_API_URL ?? '/csfaq/api';
+  const videoSource = orientation.videoUrl.startsWith('http')
+    ? orientation.videoUrl
+    : `${API_BASE}${orientation.videoUrl}`;
 
   const suggestions = [
     "How does the contribution process work?",
