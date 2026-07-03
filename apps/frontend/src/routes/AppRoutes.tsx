@@ -51,6 +51,7 @@ const AdminSupportGuidance = lazy(() => import('../admin/pages/AdminSupportGuida
 const AdminSupportAnalytics = lazy(() => import('../admin/pages/AdminSupportAnalytics'));
 const AdminSupportCategories = lazy(() => import('../admin/pages/AdminSupportCategories'));
 const AdminGoldenTickets = lazy(() => import('../admin/pages/AdminGoldenTickets'));
+const AdminGoldenLogs = lazy(() => import('../admin/pages/AdminGoldenLogs'));
 const AdminFeatures = lazy(() => import('../admin/pages/AdminFeatures'));
 const AdminWelcomePage = lazy(() => import('../admin/pages/AdminWelcomePage'));
 const AdminZoomAssessmentsPage = lazy(() => import('../admin/pages/AdminZoomAssessmentsPage'));
@@ -106,7 +107,13 @@ export default function AppRoutes() {
 
   return (
     <>
-      <Suspense fallback={<div className="min-h-screen bg-bg flex items-center justify-center"><Spinner size="md" /></div>}>
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-bg flex items-center justify-center">
+            <Spinner size="md" />
+          </div>
+        }
+      >
         <Routes>
           <Route element={<MainLayout />}>
             <Route path="/" element={<HomePage />} />
@@ -141,45 +148,314 @@ export default function AppRoutes() {
             />
           </Route>
 
+          <Route path="/admin/login" element={<AdminLogin />} />
           <Route
-            path="/admin/login"
-            element={<AdminLogin />}
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminDashboard />
+                </AdminLayout>
+              </AdminRoute>
+            }
           />
-          <Route path="/admin" element={<AdminRoute><AdminLayout><AdminDashboard /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/faqs" element={<AdminRoute><AdminLayout><AdminFAQs /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/users" element={<AdminRoute><AdminLayout><AdminUsers /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/settings" element={<AdminRoute><AdminLayout><AdminSettings /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/community" element={<AdminRoute><AdminLayout><AdminCommunity /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/moderation" element={<AdminRoute><AdminLayout><AdminModeration /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/unresolved-search" element={<AdminRoute><AdminLayout><AdminUnresolvedSearch /></AdminLayout></AdminRoute>} />
-           <Route path="/admin/zoom-meetings" element={<AdminRoute><AdminLayout><AdminZoomMeetings /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/zoom-insights" element={<AdminRoute><AdminLayout><AdminZoomInsights /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/document-insights" element={<AdminRoute><AdminLayout><FeatureGate featureKey="documentPipeline" featureLabel="Document Pipeline"><AdminDocumentInsights /></FeatureGate></AdminLayout></AdminRoute>} />
-          <Route path="/admin/settings/ai" element={<AdminRoute><AdminLayout><AdminAISettings /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/faqs/review" element={<AdminRoute><AdminLayout><FeatureGate featureKey="faqFreshness" featureLabel="FAQ Freshness Review"><FaqReview /></FeatureGate></AdminLayout></AdminRoute>} />
-          <Route path="/admin/welcome" element={<AdminRoute><AdminLayout><AdminWelcomePage /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/zoom" element={<AdminRoute><AdminLayout><AdminZoomAssessmentsPage /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/zoom/questions" element={<AdminRoute><AdminLayout><AdminZoomQuestionsPage /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/projects" element={<AdminRoute><AdminLayout><AdminProjectsPage /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/auto-answer" element={<AdminRoute><AdminLayout><FeatureGate featureKey="aiAutoAnswer" featureLabel="AI Auto-Answer"><AdminAutoAnswerQueue /></FeatureGate></AdminLayout></AdminRoute>} />
-          <Route path="/admin/faq-audit" element={<AdminRoute><AdminLayout><FeatureGate featureKey="faqFreshness" featureLabel="FAQ Freshness Audit"><AdminFAQAudit /></FeatureGate></AdminLayout></AdminRoute>} />
-          <Route path="/admin/batches" element={<AdminRoute><AdminLayout><AdminBatches /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/courses" element={<AdminRoute><AdminLayout><AdminCoursesPage /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/programs/:id/settings" element={<AdminRoute><AdminLayout><AdminProgramSettingsPage /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/programs/:id/categories" element={<AdminRoute><AdminLayout><AdminDynamicCategoriesPage /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/programs" element={<AdminRoute><AdminLayout><AdminProgramDashboard /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/programs/:id" element={<AdminRoute><AdminLayout><AdminProgramDetail /></AdminLayout></AdminRoute>} />
-          <Route path="/admin/support" element={<AdminRoute><AdminLayout><FeatureGate featureKey="sessionSupport" featureLabel="Support Dashboard"><AdminSupportLayout /></FeatureGate></AdminLayout></AdminRoute>}>
+          <Route
+            path="/admin/faqs"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminFAQs />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminUsers />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/settings"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminSettings />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/community"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminCommunity />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/moderation"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminModeration />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/unresolved-search"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminUnresolvedSearch />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/zoom-meetings"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminZoomMeetings />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/zoom-insights"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminZoomInsights />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/document-insights"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <FeatureGate featureKey="documentPipeline" featureLabel="Document Pipeline">
+                    <AdminDocumentInsights />
+                  </FeatureGate>
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/settings/ai"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminAISettings />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/faqs/review"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <FeatureGate featureKey="faqFreshness" featureLabel="FAQ Freshness Review">
+                    <FaqReview />
+                  </FeatureGate>
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/welcome"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminWelcomePage />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/zoom"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminZoomAssessmentsPage />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/zoom/questions"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminZoomQuestionsPage />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/projects"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminProjectsPage />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/auto-answer"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <FeatureGate featureKey="aiAutoAnswer" featureLabel="AI Auto-Answer">
+                    <AdminAutoAnswerQueue />
+                  </FeatureGate>
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/faq-audit"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <FeatureGate featureKey="faqFreshness" featureLabel="FAQ Freshness Audit">
+                    <AdminFAQAudit />
+                  </FeatureGate>
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/batches"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminBatches />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/courses"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminCoursesPage />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/programs/:id/settings"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminProgramSettingsPage />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/programs/:id/categories"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminDynamicCategoriesPage />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/programs"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminProgramDashboard />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/programs/:id"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminProgramDetail />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/support"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <FeatureGate featureKey="sessionSupport" featureLabel="Support Dashboard">
+                    <AdminSupportLayout />
+                  </FeatureGate>
+                </AdminLayout>
+              </AdminRoute>
+            }
+          >
             <Route index element={<AdminSupportInbox />} />
             <Route path="analytics" element={<AdminSupportAnalytics />} />
             <Route path="guidance" element={<AdminSupportGuidance />} />
             <Route path="categories" element={<AdminSupportCategories />} />
             <Route path=":id" element={<AdminSupportTicket />} />
           </Route>
-          <Route path="/admin/golden-tickets" element={<AdminRoute><AdminLayout><FeatureGate featureKey="goldenTicket" featureLabel="Golden Tickets"><AdminSupportLayout /></FeatureGate></AdminLayout></AdminRoute>}>
+          <Route
+            path="/admin/golden-tickets"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <FeatureGate featureKey="goldenTicket" featureLabel="Golden Tickets">
+                    <AdminSupportLayout />
+                  </FeatureGate>
+                </AdminLayout>
+              </AdminRoute>
+            }
+          >
             <Route index element={<AdminGoldenTickets />} />
           </Route>
-          <Route path="/admin/features" element={<AdminRoute><AdminLayout><AdminFeatures /></AdminLayout></AdminRoute>} />
+          {/* v1.71 — Golden Logs: dedicated page for resolved/rejected
+              Golden tickets so admins can read the full thread and
+              post additional answers (no SP charged, in-app bell only). */}
+          <Route
+            path="/admin/golden-logs"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <FeatureGate featureKey="goldenTicket" featureLabel="Golden Logs">
+                    <AdminSupportLayout />
+                  </FeatureGate>
+                </AdminLayout>
+              </AdminRoute>
+            }
+          >
+            <Route index element={<AdminGoldenLogs />} />
+          </Route>
+          <Route
+            path="/admin/features"
+            element={
+              <AdminRoute>
+                <AdminLayout>
+                  <AdminFeatures />
+                </AdminLayout>
+              </AdminRoute>
+            }
+          />
 
           <Route path="*" element={<Navigate to="/" state={{ from: location.pathname }} />} />
         </Routes>
