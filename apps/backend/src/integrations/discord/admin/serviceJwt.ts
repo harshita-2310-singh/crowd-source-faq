@@ -12,12 +12,13 @@
  *     headers: { Authorization: `Bearer ${token}` },
  *   });
  *
- * NOTE (v1.69): the standard `protect` middleware still calls
- * `User.findById(decoded.id)`, so a service JWT alone will 401 until
- * `authShared.ts` learns the `kind: 'service'` bypass (out of scope
- * for this commit). Until then the bot should prefer the existing
- * `X-Internal-Api-Key` path (`protect` already accepts it via
- * `checkInternalApiKey`).
+ * NOTE (v1.69): the standard `protect` middleware checks
+ * `User.findById(decoded.id)` and would 401 a service token. As of
+ * v1.70, `authShared.verifyAndLoadUser` short-circuits on
+ * `decoded.kind === 'service'` and synthesises an admin `req.user`,
+ * so this token is accepted by every `protect` + `authorize('admin')`
+ * route. The fallback `X-Internal-Api-Key` path remains available
+ * for callers that don't have a service JWT.
  */
 import jwt from 'jsonwebtoken';
 
