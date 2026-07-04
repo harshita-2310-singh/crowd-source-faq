@@ -37,11 +37,28 @@
  *    shape the crawler needs.
  */
 
-import { request } from 'undici';
+import { Agent, request, interceptors } from 'undici';
 
 const MAX_BYTES = 2_000_000; // 2MB
 const TIMEOUT_MS = 10_000;
 const USER_AGENT = 'shamagama-bot/1.0 (+web-pages)';
+
+// Phase 5 constraint: 3 redirects max. undici v6 doesn't accept
+// `maxRedirections` as a top-level request option — redirects are
+// opt-in via an interceptor on the dispatcher. A shared Agent is
+// cheaper than a one-off Client per fetch (connection pooling) and
+// keeps the redirect policy in one place.
+//
+// The `interceptors` shape `{ Agent: [...] }` is correct at runtime
+// (verified against undici 6.24.1 lib/dispatcher/agent.js:42), but
+// the Agent.Options type extends Pool.Options['interceptors'] which
+// requires a `Client` key. Cast through the constructor options to
+// satisfy the type checker without weakening the runtime contract.
+const fetchAgent = new Agent({
+  interceptors: {
+    Agent: [interceptors.redirect({ maxRedirections: 3 })],
+  },
+} as unknown as ConstructorParameters<typeof Agent>[0]);
 
 export interface FetchedPage {
   title: string;
@@ -81,7 +98,7 @@ export async function fetchAndExtractPage(url: string): Promise<FetchedAndLinked
     },
     bodyTimeout: TIMEOUT_MS,
     headersTimeout: TIMEOUT_MS,
-    maxRedirections: 3,
+    dispatcher: fetchAgent,
   });
   if (res.statusCode >= 400) {
     throw new Error(`HTTP ${res.statusCode}`);
