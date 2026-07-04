@@ -238,7 +238,7 @@ export const ConfigSchema = z.object({
     timezone: z.string().default('UTC'),
     promotionCycleIntervalMs: z.number().default(900000),
     freshnessCheckIntervalMs: z.number().default(86400000),
-    categoryClusterIntervalMs: z.number().default(86400000),
+    categoryClusterIntervalMs: z.number().default(172800000), // 2 days — v1.71 LLM recategorize
     popularityRecomputeIntervalMs: z.number().default(300000),
     retentionPolicyIntervalMs: z.number().default(86400000),
     zoomRetryIntervalMs: z.number().default(300000),

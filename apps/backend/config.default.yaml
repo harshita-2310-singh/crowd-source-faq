@@ -231,13 +231,13 @@ reputation:
 # ── Cron Schedules ────────────────────────────────────────────────
 cron:
   timezone: "UTC"
-  promotionCycleIntervalMs: 900000     # 15 min
-  freshnessCheckIntervalMs: 86400000   # 24 hours
-  categoryClusterIntervalMs: 86400000  # 24 hours
-  popularityRecomputeIntervalMs: 300000 # 5 min
-  retentionPolicyIntervalMs: 86400000  # 24 hours
-  zoomRetryIntervalMs: 300000          # 5 min
-  searchLogFlushIntervalMs: 30000      # 30 sec
+  promotionCycleIntervalMs: 900000        # 15 min
+  freshnessCheckIntervalMs: 86400000      # 24 hours
+  categoryClusterIntervalMs: 172800000    # 48 hours — v1.71 LLM recategorize
+  popularityRecomputeIntervalMs: 300000   # 5 min
+  retentionPolicyIntervalMs: 86400000     # 24 hours
+  zoomRetryIntervalMs: 300000             # 5 min
+  searchLogFlushIntervalMs: 30000         # 30 sec
 
 # ── Data Retention ────────────────────────────────────────────────
 retention:
