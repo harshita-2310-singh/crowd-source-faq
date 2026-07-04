@@ -1,7 +1,6 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
-import type { ErrorEvent, EventHint } from '@sentry/node';
-import { expressIntegration, mongooseIntegration, setupExpressErrorHandler } from '@sentry/node';
+import { setupExpressErrorHandler } from '@sentry/node';
 import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,100 +12,11 @@ import { internalApiKeyOrAdmin } from '../middleware/internalApiKeyOrAdmin.js';
 import { getContext } from '../utils/http/requestContext.js';
 import { sentryRequestTagsMiddleware } from '../utils/sentryTags.js';
 
-/**
- * Strip PII from outgoing Sentry events.
- *  - Authorization / Cookie headers
- *  - request body (POSTs often contain emails, passwords, OAuth tokens)
- *  - cookies from request headers
- * sendDefaultPii:false already covers IP / user-agent; this is the belt-and-braces.
- */
-function sentryBeforeSend(event: ErrorEvent, _hint: EventHint): ErrorEvent | null {
-  if (event.request) {
-    if (event.request.headers) {
-      const headers = event.request.headers as Record<string, unknown>;
-      delete headers['authorization'];
-      delete headers['Authorization'];
-      delete headers['cookie'];
-      delete headers['Cookie'];
-    }
-    if (event.request.data) {
-      delete event.request.data;
-    }
-    if (event.request.cookies) {
-      delete event.request.cookies;
-    }
-  }
-  return event;
-}
-
-/** Same PII scrub, but for transaction events (which have no ErrorEvent envelope). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function sentryBeforeSendTransaction(event: any, _hint: EventHint): any {
-  if (event.request) {
-    if (event.request.headers) {
-      const headers = event.request.headers as Record<string, unknown>;
-      delete headers['authorization'];
-      delete headers['Authorization'];
-      delete headers['cookie'];
-      delete headers['Cookie'];
-    }
-    if (event.request.data) {
-      delete event.request.data;
-    }
-    if (event.request.cookies) {
-      delete event.request.cookies;
-    }
-  }
-  return event;
-}
-
 export function createApp(config: any): Express {
-  // ── Sentry init ────────────────────────────────────────────────────────────
-  // Two Sentry clients: one for the backend project (HTTP errors + traces),
-  // a second one for the DB project (Mongoose spans). Both share the same
-  // PII filtering and tagger middleware. Falls back to SENTRY_DSN for the DB
-  // client if SENTRY_DB_DSN is not set.
+  // Sentry.init() runs in src/instrument.ts (loaded via `tsx --import`),
+  // so by the time we get here, Express + Mongoose are already patched.
   const sentryEnabled = config.observability.sentry.enabled;
   const sentryDsn = process.env.SENTRY_DSN;
-  const sentryDbDsn = process.env.SENTRY_DB_DSN || sentryDsn;
-  const sentryEnv = process.env.SENTRY_ENV || config.server.env;
-  const sentryRelease = process.env.SENTRY_RELEASE;
-  const sentryDebug = process.env.SENTRY_DEBUG === 'true';
-  const sentryTracesSampleRate = config.observability.sentry.tracesSampleRate;
-
-  if (sentryEnabled && sentryDsn) {
-    Sentry.init({
-      dsn: sentryDsn,
-      environment: sentryEnv,
-      release: sentryRelease,
-      debug: sentryDebug,
-      sendDefaultPii: false,
-      tracesSampleRate: sentryTracesSampleRate,
-      integrations: [
-        expressIntegration(),
-        mongooseIntegration(),
-      ],
-      beforeSend: sentryBeforeSend,
-      beforeSendTransaction: sentryBeforeSendTransaction,
-    });
-  }
-
-  // Separate client for DB spans — only if a different DSN is configured.
-  // (When SENTRY_DB_DSN is unset we fall back to the main client above, so
-  // this block is a no-op.)
-  if (sentryEnabled && sentryDbDsn && sentryDbDsn !== sentryDsn) {
-    Sentry.init({
-      dsn: sentryDbDsn,
-      environment: sentryEnv,
-      release: sentryRelease,
-      debug: sentryDebug,
-      sendDefaultPii: false,
-      tracesSampleRate: sentryTracesSampleRate,
-      integrations: [mongooseIntegration()],
-      beforeSend: sentryBeforeSend,
-      beforeSendTransaction: sentryBeforeSendTransaction,
-    });
-  }
 
   // Track unhandled promise rejections
   process.on('unhandledRejection', (reason) => {
