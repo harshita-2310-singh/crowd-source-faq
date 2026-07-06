@@ -33,9 +33,9 @@
 :root {
   /* ── Backgrounds (RGB triples) ──────────────────────────────── */
   --bg-primary-rgb: 251 237 224;      /* #FBEDE0 — Page bg (brand) */
-  --bg-secondary-rgb: 248 241 232;    /* #F8F1E8 — Surface (brand) */
-  --bg-card-rgb: 255 248 241;         /* #FFF8F1 — Card (brand) */
-  --bg-card-hover-rgb: 245 231 216;   /* #F5E7D8 — Hover (brand) */
+  --bg-secondary-rgb: 255 246 235;    /* cream + warm lift — surface (brand) */
+  --bg-card-rgb: 255 242 230;         /* cream + peach touch — card (brand) */
+  --bg-card-hover-rgb: 251 234 218;   /* slight peach shift on hover */
 
   /* ── Text ────────────────────────────────────────────────────── */
   --text-primary-rgb: 60 42 30;       /* #3C2A1E — Primary text (brand) */
@@ -49,17 +49,17 @@
 
   /* ── Borders ─────────────────────────────────────────────────── */
   --border-rgb: 196 152 130;          /* #C49882 — Border (brand) */
-  --border-subtle-rgb: 232 215 202;    /* #E8D7CA — Border soft (brand) */
+  --border-subtle-rgb: 232 215 202;    /* derived — soft border */
   --border-medium-rgb: 175 130 108;
 
   --icon-default-rgb: 140 125 112;
   --icon-active-rgb: 184 133 102;
 
   /* ── Status (Light) ──────────────────────────────────────────── */
-  --success-rgb: 126 156 114;         /* #7E9C72 — Sage Green (brand) */
-  --warning-rgb: 216 155 82;          /* #D89B52 — Amber (brand) */
-  --danger-rgb: 228 131 104;          /* #E48368 — Coral (brand) */
-  --info-rgb: 141 157 182;            /* #8D9DB6 — Slate Blue (brand) */
+  --success-rgb: 126 156 114;         /* #7E9C72 — Sage Green */
+  --warning-rgb: 216 155 82;          /* #D89B52 — Amber */
+  --danger-rgb: 228 131 104;          /* #E48368 — Coral */
+  --info-rgb: 141 157 182;            /* #8D9DB6 — Slate Blue */
 
   --nav-bg-rgb: 251 237 224;
   --nav-text-rgb: 106 84 69;
@@ -82,7 +82,7 @@
   --info-bg: rgba(141, 157, 182, 0.14);
   --danger-bg: rgba(228, 131, 104, 0.10);
 
-  --pill-bg: #FFF8F1;                  /* matches Card */
+  --pill-bg: #FFF2E6;                  /* matches Card (cream + peach touch) */
   --pill-border: #E8D7CA;              /* matches Border soft */
   --pill-text: #6B4A30;
   --pill-active-bg: #B88566;            /* solid warm brown — accent on active */
@@ -91,7 +91,7 @@
   --pill-active-text-on-bg: #FBEDE0;
   --pill-active-indicator: #B88566;
 
-  --input-bg: #FFF8F1;                 /* matches Card */
+  --input-bg: #FFF2E6;                 /* matches Card */
   --input-border: #E8D7CA;
   --input-placeholder: #AC9F7C;
   --input-focus-border: rgba(184, 133, 102, 0.55);
@@ -103,9 +103,9 @@
 
   --modal-bg: #FFFFFF;                 /* modal uses pure white for max lift above cream */
   --modal-border: #E8D7CA;
-  --dropdown-bg: #FFF8F1;
+  --dropdown-bg: #FFF2E6;
   --dropdown-border: #E8D7CA;
-  --dropdown-hover: #F5E7D8;           /* matches Hover */
+  --dropdown-hover: #FBEADE;           /* matches Hover */
   --overlay-bg: rgba(60, 42, 30, 0.4);
 
   --scrollbar-thumb: #C49882;
@@ -114,7 +114,7 @@
   /* ── Theme-toggle (light defaults) ─────────────────────────────── */
   --toggle-pill-bg: rgba(184, 133, 102, 0.14);
   --toggle-pill-border: rgba(184, 133, 102, 0.30);
-  --toggle-knob-bg: #FFF8F1;
+  --toggle-knob-bg: #FFF2E6;
   --toggle-icon-color: #B88566;
   --toggle-knob-x: 3px;
   --toggle-sun-opacity: 1;
@@ -177,97 +177,90 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   DARK MODE — warm charcoal palette
+   DARK MODE — ultra-deep pitch + electric coral
 
    Anchors (brand):
-     #1C1B1A  Background  — page bg (charcoal)
-     #252321  Surface     — modals / dropdowns / inputs
-     #2E2B28  Card        — elevated cards
-     #393531  Hover       — hover state
-     #3D3935  Border      — crisp gray dividers
-     #4A4642  Border soft — soft borders
-     #F7F2EC  Text        — warm off-white body text
-     #D1C6BC  Text Sec    — secondary text
-     #9E9488  Muted Text  — placeholders / disabled
-     #E48368  Accent      — coral primary accent
-     #F09980  Accent Hov  — brighter coral on hover
-     #4A3530  Accent soft — selected bg (coral-tinted dark)
-     #8CA67D  Success     — sage green (dark variant)
-     #D9A25B  Warning     — amber (dark variant)
-     #7F95AE  Info        — steel blue (dark variant)
+     #0A0B0E  Background       — page bg (ultra-deep pitch)
+     #121418  Surface          — modals / dropdowns / inputs
+     #191C21  Card             — elevated cards (deep onyx)
+     #2A2D35  Border           — crisp gray dividers
+     #EDEDED  Text             — crisp off-white body text
+     #868A93  Muted Text       — cool slate
+     #FF6B4A  Electric Coral   — primary accent (vibrant pop)
+     #FF856B  Electric Coral H — lighter coral on hover
 
    Light mode is unaffected by this block.
    ═══════════════════════════════════════════════════════════════ */
 [data-theme="dark"] {
-  --bg-primary-rgb: 28 27 26;          /* #1C1B1A — Background (brand) */
-  --bg-secondary-rgb: 37 35 33;       /* #252321 — Surface (brand) */
-  --bg-card-rgb: 46 43 40;            /* #2E2B28 — Card (brand) */
-  --bg-card-hover-rgb: 57 53 49;      /* #393531 — Hover (brand) */
+  --bg-primary-rgb: 10 11 14;          /* #0A0B0E — Background (brand) */
+  --bg-secondary-rgb: 18 20 24;       /* #121418 — Surface (brand) */
+  --bg-card-rgb: 25 28 33;            /* #191C21 — Card (brand) */
+  --bg-card-hover-rgb: 35 38 44;      /* slight lift on hover */
 
-  --text-primary-rgb: 247 242 236;    /* #F7F2EC — Text (brand) */
-  --text-secondary-rgb: 209 198 188;  /* #D1C6BC — Secondary text (brand) */
-  --text-muted-rgb: 158 148 136;      /* #9E9488 — Muted Text (brand) */
+  --text-primary-rgb: 237 237 237;    /* #EDEDED — Text (brand) */
+  --text-secondary-rgb: 180 184 190;  /* derived — between text and muted */
+  --text-muted-rgb: 134 138 147;      /* #868A93 — Muted Text (brand) */
 
-  --accent-rgb: 228 131 104;          /* #E48368 — Accent (brand) */
-  --accent-hover-rgb: 240 153 128;    /* #F09980 — Hover (brand) */
-  --accent-text-rgb: 28 27 26;        /* #1C1B1A — Text on accent (brand) */
+  --accent-rgb: 255 107 74;           /* #FF6B4A — Electric Coral (brand) */
+  --accent-hover-rgb: 255 133 107;    /* #FF856B — Lighter Electric Coral (brand) */
+  --accent-text-rgb: 10 11 14;        /* #0A0B0E — Text on accent (brand) */
 
-  --border-rgb: 61 57 53;             /* #3D3935 — Border (brand) */
-  --border-subtle-rgb: 74 70 66;      /* #4A4642 — Border soft (brand) */
-  --border-medium-rgb: 92 86 80;
+  --border-rgb: 42 45 53;             /* #2A2D35 — Border (brand) */
+  --border-subtle-rgb: 28 30 36;
+  --border-medium-rgb: 56 60 70;
 
-  --icon-default-rgb: 158 148 136;
-  --icon-active-rgb: 228 131 104;
+  --icon-default-rgb: 134 138 147;
+  --icon-active-rgb: 255 107 74;
 
-  /* Status (Dark) */
-  --success-rgb: 140 166 125;         /* #8CA67D — Success (brand) */
-  --warning-rgb: 217 162 91;          /* #D9A25B — Warning (brand) */
-  --danger-rgb: 228 131 104;          /* #E48368 — Danger (brand) */
-  --info-rgb: 127 149 174;            /* #7F95AE — Info (brand) */
+  /* Status (Dark) — kept from previous palette since you didn't redefine */
+  --success-rgb: 140 166 125;         /* #8CA67D — Sage Green */
+  --warning-rgb: 217 162 91;          /* #D9A25B — Amber */
+  --danger-rgb: 240 80 70;            /* derived — deeper electric coral-ish for destructive */
+  --info-rgb: 127 149 174;            /* #7F95AE — Steel Blue */
 
-  --nav-bg-rgb: 28 27 26;
-  --nav-text-rgb: 209 198 188;
-  --nav-active-rgb: 247 242 236;
-  --nav-border-rgb: 61 57 53;
+  --nav-bg-rgb: 10 11 14;
+  --nav-text-rgb: 180 184 190;
+  --nav-active-rgb: 237 237 237;
+  --nav-border-rgb: 42 45 53;
 
-  --section-title-rgb: 247 242 236;
+  --section-title-rgb: 237 237 237;
 
   /* Pre-tinted semantic colors (full rgba — no /<alpha-value>) */
-  --tag-high-bg: rgba(228, 131, 104, 0.16);     /* accent-soft (coral) */
-  --tag-high-text: #E48368;
-  --tag-medium-bg: rgba(217, 162, 91, 0.16);    /* warning-soft */
+  --tag-high-bg: rgba(255, 107, 74, 0.18);       /* electric-coral-soft */
+  --tag-high-text: #FF6B4A;
+  --tag-medium-bg: rgba(217, 162, 91, 0.16);     /* warning-soft */
   --tag-medium-text: #D9A25B;
   --badge-solved-bg: rgba(140, 166, 125, 0.18); /* success-soft */
   --badge-solved-text: #8CA67D;
   --badge-open-bg: rgba(255, 255, 255, 0.06);
-  --badge-open-text: #9E9488;
+  --badge-open-text: #868A93;
   --success-bg: rgba(140, 166, 125, 0.14);
   --warning-bg: rgba(217, 162, 91, 0.14);
   --info-bg: rgba(127, 149, 174, 0.14);
-  --danger-bg: rgba(228, 131, 104, 0.14);
+  --danger-bg: rgba(240, 80, 70, 0.16);
 
   --pill-bg: rgba(255, 255, 255, 0.05);
   --pill-border: rgba(255, 255, 255, 0.10);
-  --pill-text: #9E9488;
-  --pill-active-bg: #E48368;                /* solid coral — accent on active */
-  --pill-active-border: #F09980;
-  --pill-active-text: #1C1B1A;
-  --pill-active-text-on-bg: #1C1B1A;
-  --pill-active-indicator: #E48368;
+  --pill-text: #868A93;
+  --pill-active-bg: #FF6B4A;                /* solid electric coral — accent on active */
+  --pill-active-border: #FF856B;
+  --pill-active-text: #0A0B0E;
+  --pill-active-text-on-bg: #0A0B0E;
+  --pill-active-indicator: #FF6B4A;
 
-  --input-bg: #252321;                   /* matches Surface */
+  --input-bg: #121418;                   /* matches Surface */
   --input-border: rgba(255, 255, 255, 0.10);
-  --input-placeholder: #9E9488;
-  --input-focus-border: rgba(228, 131, 104, 0.50);
+  --input-placeholder: #868A93;
+  --input-focus-border: rgba(255, 107, 74, 0.55);
 
-  --nav-active-indicator: #E48368;
-  --section-icon: #E48368;
-  --deco-stroke: rgba(228, 131, 104, 0.40);
-  --deco-stroke-soft: rgba(228, 131, 104, 0.20);
+  --nav-active-indicator: #FF6B4A;
+  --section-icon: #FF6B4A;
+  --deco-stroke: rgba(255, 107, 74, 0.45);
+  --deco-stroke-soft: rgba(255, 107, 74, 0.22);
 
-  --modal-bg: #252321;
+  --modal-bg: #121418;
   --modal-border: rgba(255, 255, 255, 0.10);
-  --dropdown-bg: #252321;
+  --dropdown-bg: #121418;
   --dropdown-border: rgba(255, 255, 255, 0.10);
   --dropdown-hover: rgba(255, 255, 255, 0.05);
   --overlay-bg: rgba(0, 0, 0, 0.70);
@@ -276,27 +269,27 @@
   --scrollbar-track: transparent;
 
   /* Toggle (dark) */
-  --toggle-pill-bg: rgba(228, 131, 104, 0.14);
-  --toggle-pill-border: rgba(228, 131, 104, 0.30);
-  --toggle-knob-bg: #E48368;
-  --toggle-icon-color: #1C1B1A;
+  --toggle-pill-bg: rgba(255, 107, 74, 0.14);
+  --toggle-pill-border: rgba(255, 107, 74, 0.30);
+  --toggle-knob-bg: #FF6B4A;
+  --toggle-icon-color: #0A0B0E;
   --toggle-knob-x: 27px;
   --toggle-sun-opacity: 0;
   --toggle-sun-transform: rotate(-90deg) scale(0.5);
   --toggle-moon-opacity: 1;
   --toggle-moon-transform: rotate(0deg) scale(1);
 
-  /* Shadows (dark) — soft, diffused, with subtle coral glow on hover */
+  /* Shadows (dark) — soft, diffused, with subtle electric-coral glow on hover */
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.55),
-                        0 0 0 1px rgba(228, 131, 104, 0.18);
+                        0 0 0 1px rgba(255, 107, 74, 0.20);
   --shadow-float: 0 12px 40px rgba(0, 0, 0, 0.7);
-  --shadow-glow: 0 0 0 3px rgba(228, 131, 104, 0.22);
+  --shadow-glow: 0 0 0 3px rgba(255, 107, 74, 0.25);
 
-  /* Body — subtle radial gradient with faint coral tint on dark */
+  /* Body — subtle radial gradient with faint electric-coral tint on dark */
   --body-bg-image:
-    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(228, 131, 104, 0.05) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 50% at 100% 100%, rgba(228, 131, 104, 0.03) 0%, transparent 60%);
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(255, 107, 74, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgba(255, 107, 74, 0.04) 0%, transparent 60%);
 
   /* ShadCN tokens (dark) — same aliases, dark values inherited from
      the overridden palette above. Component renders adapt automatically. */
@@ -315,16 +308,16 @@
   --accent: var(--bg-secondary-rgb);
   --accent-foreground: var(--text-primary-rgb);
   --destructive: var(--danger-rgb);
-  --destructive-foreground: 28 27 26;
+  --destructive-foreground: 10 11 14;
   --border: var(--border-rgb);
   --input: var(--border-rgb);
   --ring: var(--accent-rgb);
 
   --chart-1: var(--accent-rgb);
-  --chart-2: 240 153 128;     /* accent-hover */
+  --chart-2: 255 133 107;     /* accent-hover */
   --chart-3: 217 162 91;      /* warning */
-  --chart-4: 220 80 70;        /* danger deeper */
-  --chart-5: 209 198 188;     /* text-secondary */
+  --chart-4: 240 80 70;        /* danger */
+  --chart-5: 134 138 147;     /* muted */
 
   --sidebar: var(--bg-card-rgb);
   --sidebar-foreground: var(--text-primary-rgb);
