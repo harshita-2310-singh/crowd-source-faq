@@ -28,12 +28,12 @@ export const DEPTH_BARS = [
 ];
 
 export const LIFECYCLE_CONFIG: Record<string, { label: string; cls: string }> = {
-  open:               { label: 'Open',              cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+  open:               { label: 'Open',              cls: 'bg-mist text-ink-soft border-border' },
   answered:           { label: 'Solved',            cls: 'bg-accent/10 text-accent border-accent/30' },
   community_accepted: { label: 'Community ✓',       cls: 'bg-accent/10 text-accent border-accent/30' },
-  ai_validated:       { label: 'AI Validated',      cls: 'bg-purple-50 text-purple-700 border-purple-200' },
-  admin_accepted:     { label: 'Admin Approved',    cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-  converted_to_faq:   { label: 'Official FAQ',      cls: 'bg-stone-100 text-stone-700 border-stone-300' },
+  ai_validated:       { label: 'AI Validated',      cls: 'bg-info/10 text-info border-info/30' },
+  admin_accepted:     { label: 'Admin Approved',    cls: 'bg-accent/10 text-accent border-accent/30' },
+  converted_to_faq:   { label: 'Official FAQ',      cls: 'bg-mist text-ink-soft border-border' },
 };
 
 // Count total descendants recursively
