@@ -269,21 +269,37 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
     }
 
     const userId = req.user!._id.toString();
-    const alreadyUpvoted = post.upvotes.map((u: Types.ObjectId) => u.toString()).includes(userId);
+    // M4-5 (MEDIUM) fix: previously this read `alreadyUpvoted` from
+    // the loaded doc BEFORE the atomic update. Two concurrent upvotes
+    // by the same user could both read `alreadyUpvoted === false`,
+    // then both call `$addToSet` (idempotent — no double-vote) and
+    // both read `alreadyUpvoted === false` afterward, so downstream
+    // decisions like "did this user just upvote?" got the wrong
+    // answer. Now: rely on the post-update `updated.upvotes` to
+    // determine the *current* membership of the user, not the pre-update
+    // snapshot. `$addToSet` is idempotent so the membership is
+    // always correct after the atomic write.
+    const wasUpvotedBefore = post.upvotes.map((u: Types.ObjectId) => u.toString()).includes(userId);
 
     // Use atomic $pull/$addToSet to avoid race-condition duplicates
     const updated = await CommunityPost.findOneAndUpdate(
       { _id: post._id },
-      alreadyUpvoted
+      wasUpvotedBefore
         ? { $pull: { upvotes: new Types.ObjectId(userId) } }
         : { $addToSet: { upvotes: new Types.ObjectId(userId) } },
       { returnDocument: 'after' }
     );
 
     const newUpvotes = updated?.upvotes?.length ?? 0;
+    // S5-M5-style fresh-state check: derive `isUpvotedByMe` from
+    // the post-update doc, not the pre-update snapshot. Eliminates
+    // the brief read-then-write race where two concurrent upvotes
+    // could both think the user was "just upvoting" and both fire
+    // the post-promotion side-effect.
+    const isUpvotedByMe = !!updated?.upvotes?.some((u: Types.ObjectId) => u.toString() === userId);
 
     // Check if this upvote just crossed the promotion threshold
-    if (!alreadyUpvoted) {
+    if (wasUpvotedBefore !== isUpvotedByMe) {
       const { checkPromotionEligibility, startPromotionReview } = await import('../program/promotion.service.js').catch((err) => {
         communityLog.warn(`[post] Failed to dynamically import promotionService: ${(err as Error).message}`);
         return { checkPromotionEligibility: null, startPromotionReview: null };
@@ -303,7 +319,12 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
 
     // Notify post author on new upvote only (self-votes and vote retractions send nothing)
     const isSelfVote = post.author.toString() === userId;
-    if (!isSelfVote && alreadyUpvoted) {
+    // M4-5: use post-update `wasUpvotedBefore` / `isUpvotedByMe` to
+    // pick the right branch. `wasUpvotedBefore === true &&
+    // !isUpvotedByMe` means the user just retracted an upvote
+    // (rollback the +2 author points). The opposite means the
+    // user just upvoted (dispatch the notification + add +2).
+    if (!isSelfVote && wasUpvotedBefore && !isUpvotedByMe) {
       await User.findByIdAndUpdate(post.author, { $inc: { points: -2, reputation: -2 } });
       await ReputationLog.deleteMany({
         userId: post.author,
@@ -312,7 +333,7 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
         action: 'upvote_received',
       });
     }
-    if (!isSelfVote && !alreadyUpvoted) {
+    if (!isSelfVote && !wasUpvotedBefore && isUpvotedByMe) {
       dispatchNotification({
         recipientId: post.author,
         eventType: 'upvote',
@@ -356,7 +377,7 @@ export const toggleUpvote = async (req: Request, res: Response): Promise<void> =
       });
     }
 
-    res.json({ upvotes: newUpvotes, upvotedByMe: !alreadyUpvoted });
+    res.json({ upvotes: newUpvotes, upvotedByMe: isUpvotedByMe });
   } catch (error) {
     communityLog.error(`[post] toggleUpvote failed: ${(error as Error).message}`);
     res.status(500).json({ message: 'Server error' });

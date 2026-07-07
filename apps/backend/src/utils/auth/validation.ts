@@ -119,6 +119,18 @@ export const reportPostSchema = z.object({
   reason: z.string().min(3).max(300),
 });
 
+// H4-2 (HIGH) fix: refresh token Zod schema. The previous
+// `refresh` controller read `req.body.refreshToken` raw — a 10MB
+// string would hit `jwt.verify` and exhaust memory. Bound it
+// between min 20 chars (longest reasonable JWT) and max 2048 chars
+// (plenty for a JWT + a few bytes of padding). The controller
+// already handles the `refreshToken: undefined` case (returns 400
+// 'Refresh token is required') so a missing field doesn't need a
+// separate Zod error.
+export const refreshSchema = z.object({
+  refreshToken: z.string().min(20).max(2048),
+});
+
 // ─── Search ─────────────────────────────────────────────────────────────────────
 export const searchSchema = z.object({
   q:      z.string().min(1),
