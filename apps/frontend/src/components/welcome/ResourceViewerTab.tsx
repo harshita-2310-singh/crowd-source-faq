@@ -554,6 +554,8 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
   const [scale, setScale] = useState<number>(1);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [containerHeight, setContainerHeight] = useState<string>('24rem');
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const expandedContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -562,13 +564,45 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
     x: 0, y: 0, scrollLeft: 0, scrollTop: 0,
   });
 
+  // Calculate and apply optimal scale/height to fit width of container
+  const fitWidth = useCallback(() => {
+    if (!dimensions) return;
+    const container = isExpanded ? expandedContainerRef.current : containerRef.current;
+    if (!container) return;
+    const containerWidth = container.clientWidth;
+    const targetWidth = containerWidth - 32;
+    const targetScale = targetWidth / dimensions.width;
+    
+    setScale(targetScale);
+    
+    if (!isExpanded) {
+      const targetHeight = dimensions.height * targetScale;
+      // Cap height between 320px and 720px
+      const finalHeight = Math.min(720, Math.max(320, targetHeight));
+      setContainerHeight(`${finalHeight}px`);
+    }
+    
+    container.scrollLeft = 0;
+    container.scrollTop = 0;
+  }, [dimensions, isExpanded]);
+
+  // Recalculate optimal width-fitting scale on resize or fullscreen toggle
+  useEffect(() => {
+    if (dimensions) {
+      const timer = setTimeout(() => {
+        fitWidth();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isExpanded, dimensions, fitWidth]);
+
   // Non-passive wheel event listener for Ctrl+Scroll zoom on both containers.
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        setScale((s) => Math.max(0.25, Math.min(8, s * factor)));
+        setScale((s) => Math.max(0.1, Math.min(8, s * factor)));
       }
     };
 
@@ -613,12 +647,27 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
     }
   };
 
-  const reset = (): void => {
-    setScale(1);
-    const el1 = containerRef.current;
-    if (el1) { el1.scrollLeft = 0; el1.scrollTop = 0; }
-    const el2 = expandedContainerRef.current;
-    if (el2) { el2.scrollLeft = 0; el2.scrollTop = 0; }
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    const w = img.naturalWidth || img.clientWidth || 800;
+    const h = img.naturalHeight || img.clientHeight || 400;
+    setDimensions({ width: w, height: h });
+  };
+
+  const handleDoubleClick = () => {
+    if (!dimensions) return;
+    const container = isExpanded ? expandedContainerRef.current : containerRef.current;
+    if (!container) return;
+    const containerWidth = container.clientWidth;
+    const targetWidth = containerWidth - 32;
+    const fitScale = targetWidth / dimensions.width;
+
+    // Toggle between fit-to-width and 1.25x zoom for details
+    if (Math.abs(scale - fitScale) < 0.05) {
+      setScale(1.25);
+    } else {
+      setScale(fitScale);
+    }
   };
 
   return (
@@ -635,12 +684,12 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
       
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[10px] text-ink-faint">
-          <span>Ctrl+Scroll to zoom {scale !== 1 ? `· ${Math.round(scale * 100)}%` : ''}</span>
+          <span>Double-click image to zoom · Ctrl+Scroll to zoom {scale !== 1 ? `· ${Math.round(scale * 100)}%` : ''}</span>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setScale((s) => Math.max(0.25, s / 1.15))}
+            onClick={() => setScale((s) => Math.max(0.1, s / 1.15))}
             className="text-[10px] text-ink-soft hover:text-ink border border-border px-1.5 py-0.5 rounded bg-bg-card hover:bg-bg-pill transition-colors"
           >
             Zoom Out
@@ -655,10 +704,10 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
           </button>
           <button
             type="button"
-            onClick={reset}
+            onClick={fitWidth}
             className="text-[10px] text-ink-soft hover:text-ink underline ml-1"
           >
-            Reset
+            Fit Width
           </button>
           <button
             type="button"
@@ -677,8 +726,14 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
 
       <div
         ref={containerRef}
-        className="rounded-lg border border-border bg-bg overflow-auto select-none relative"
-        style={{ height: '24rem', cursor: isDragging ? 'grabbing' : 'grab' }}
+        className="rounded-lg border border-border bg-bg overflow-auto select-none relative flex items-center justify-center"
+        style={{
+          height: containerHeight,
+          cursor: isDragging ? 'grabbing' : 'grab',
+          backgroundImage: 'radial-gradient(rgba(100, 110, 120, 0.08) 1.2px, transparent 0)',
+          backgroundSize: '16px 16px',
+          transition: 'height 0.2s ease-out',
+        }}
         onMouseEnter={start}
         onTouchStart={start}
         onPointerDown={(e) => onPointerDownGeneric(e, containerRef)}
@@ -686,21 +741,39 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
         onPointerUp={(e) => onPointerUpGeneric(e, containerRef)}
         onPointerCancel={(e) => onPointerUpGeneric(e, containerRef)}
       >
-        {imgError ? null : (
-          <img
-            src={resource.url}
-            alt={resource.title}
-            className="yaksha-svg-pan"
-            style={{
-              width: `${100 * scale}%`,
-              height: 'auto',
-              display: 'block',
-              transition: 'width 0.1s ease-out',
-              transformOrigin: 'top left',
-            }}
-            onError={() => setImgError('Could not load SVG from Cloudinary.')}
-          />
-        )}
+        <div
+          style={{
+            minWidth: '100%',
+            minHeight: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.5rem',
+            boxSizing: 'border-box',
+          }}
+        >
+          {imgError ? null : (
+            <img
+              src={resource.url}
+              alt={resource.title}
+              onLoad={handleImageLoad}
+              onDoubleClick={handleDoubleClick}
+              style={dimensions ? {
+                width: `${dimensions.width * scale}px`,
+                height: `${dimensions.height * scale}px`,
+                display: 'block',
+                transition: 'width 0.1s ease-out, height 0.1s ease-out',
+                userSelect: 'none',
+                maxWidth: 'none',
+              } : {
+                maxWidth: '100%',
+                maxHeight: '100%',
+                display: 'block',
+              }}
+              onError={() => setImgError('Could not load SVG from Cloudinary.')}
+            />
+          )}
+        </div>
       </div>
 
       {imgError && (
@@ -720,13 +793,13 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
           <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
             <div>
               <h3 className="text-lg font-semibold text-white">{resource.title}</h3>
-              <p className="text-xs text-zinc-400">Drag to pan · Ctrl+Scroll to zoom</p>
+              <p className="text-xs text-zinc-400">Drag to pan · Double-click to zoom · Scroll to zoom</p>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5 bg-white/5 rounded-lg border border-white/10 p-1">
                 <button
                   type="button"
-                  onClick={() => setScale((s) => Math.max(0.25, s / 1.15))}
+                  onClick={() => setScale((s) => Math.max(0.1, s / 1.15))}
                   className="p-1.5 hover:bg-white/10 rounded text-zinc-300 hover:text-white transition-colors"
                   title="Zoom Out"
                 >
@@ -751,10 +824,10 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
               </div>
               <button
                 type="button"
-                onClick={reset}
+                onClick={fitWidth}
                 className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-medium text-zinc-300 hover:bg-white/10 hover:text-white transition-all active:scale-95"
               >
-                Reset
+                Fit Width
               </button>
               <button
                 type="button"
@@ -773,25 +846,47 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
           {/* Canvas */}
           <div
             ref={expandedContainerRef}
-            className="flex-1 w-full bg-zinc-950/60 rounded-xl border border-white/10 overflow-auto relative select-none"
-            style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+            className="flex-1 w-full bg-zinc-950/60 rounded-xl border border-white/10 overflow-auto relative select-none flex items-center justify-center"
+            style={{
+              cursor: isDragging ? 'grabbing' : 'grab',
+              backgroundImage: 'radial-gradient(rgba(255, 255, 255, 0.08) 1.2px, transparent 0)',
+              backgroundSize: '20px 20px',
+            }}
             onPointerDown={(e) => onPointerDownGeneric(e, expandedContainerRef)}
             onPointerMove={(e) => onPointerMoveGeneric(e, expandedContainerRef)}
             onPointerUp={(e) => onPointerUpGeneric(e, expandedContainerRef)}
             onPointerCancel={(e) => onPointerUpGeneric(e, expandedContainerRef)}
           >
-            <img
-              src={resource.url}
-              alt={resource.title}
+            <div
               style={{
-                width: `${100 * scale}%`,
-                height: 'auto',
-                display: 'block',
-                transition: 'width 0.1s ease-out',
-                transformOrigin: 'top left',
+                minWidth: '100%',
+                minHeight: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '2rem',
+                boxSizing: 'border-box',
               }}
-              onError={() => setImgError('Could not load SVG.')}
-            />
+            >
+              <img
+                src={resource.url}
+                alt={resource.title}
+                onDoubleClick={handleDoubleClick}
+                style={dimensions ? {
+                  width: `${dimensions.width * scale}px`,
+                  height: `${dimensions.height * scale}px`,
+                  display: 'block',
+                  transition: 'width 0.1s ease-out, height 0.1s ease-out',
+                  userSelect: 'none',
+                  maxWidth: 'none',
+                } : {
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  display: 'block',
+                }}
+                onError={() => setImgError('Could not load SVG.')}
+              />
+            </div>
           </div>
         </div>,
         document.body
