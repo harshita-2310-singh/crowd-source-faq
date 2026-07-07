@@ -113,6 +113,7 @@ function ChatProviderFields({
   provider, draft, setProviderDrafts, override, isActive, hasKey, monoInput,
   saving, testing, testResult, onSwitchActive, onTest, onSave, onReveal, onClear,
   savingProviderGlobal,
+  liveModels, browsingModels, browseError, onBrowse,
 }: {
   provider: ProviderKey;
   draft: { apiKey: string; baseURL: string; model: string; showKey: boolean; revealing: boolean };
@@ -130,6 +131,13 @@ function ChatProviderFields({
   onReveal: (p: ProviderKey) => void;
   onClear: (p: ProviderKey) => void;
   savingProviderGlobal: boolean;
+  // Live model browser state for this provider. `liveModels` is the
+  // union of the backend response + the hardcoded suggestedModels so
+  // the datalist still works even if the live fetch failed.
+  liveModels: string[];
+  browsingModels: boolean;
+  browseError: string | null;
+  onBrowse: (provider: ProviderKey) => void;
 }) {
   const meta = PROVIDER_META[provider];
   const healthBadge = isActive
@@ -192,12 +200,37 @@ function ChatProviderFields({
 
         <div>
           <label className="block text-[10px] font-semibold text-ink-faint uppercase mb-1">Default Model <span className="text-[9px] font-normal">(optional)</span></label>
-          <input type="text" list={`suggested-models-${provider}`} value={draft.model}
-            onChange={e => setProviderDrafts(prev => ({ ...prev, [provider]: { ...prev[provider], model: e.target.value } }))}
-            placeholder={meta.defaultModel} className={monoInput} />
+          <div className="flex gap-2">
+            <input type="text" list={`suggested-models-${provider}`} value={draft.model}
+              onChange={e => setProviderDrafts(prev => ({ ...prev, [provider]: { ...prev[provider], model: e.target.value } }))}
+              placeholder={meta.defaultModel} className={monoInput} />
+            {/* Live model browser. Disabled when no API key is configured
+                (the backend would just return ok:false with an empty list
+                anyway, but failing fast in the UI gives clearer feedback). */}
+            <button type="button" onClick={() => onBrowse(provider)}
+              disabled={browsingModels || !hasKey}
+              title={!hasKey ? 'Save an API key first, then browse live models.' : 'Fetch available models from the provider API.'}
+              className={`${adminBtnSecondary} px-2 py-1.5 text-[10px] flex items-center gap-1.5 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed`}>
+              {browsingModels
+                ? <><span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />Fetching…</>
+                : '🔄 Browse live'}
+            </button>
+          </div>
           <datalist id={`suggested-models-${provider}`}>
-            {meta.suggestedModels.map(m => <option key={m} value={m} />)}
+            {/* Union of hardcoded suggestedModels + any live results.
+                Dedupe so the same model id doesn't show twice. Live models
+                come first (so the browser's most recent fetch is visible
+                above the historical defaults). */}
+            {Array.from(new Set([...liveModels, ...meta.suggestedModels])).map(m => (
+              <option key={m} value={m} />
+            ))}
           </datalist>
+          {browseError && (
+            <p className="text-[10px] text-danger mt-1">⚠ {browseError}</p>
+          )}
+          {liveModels.length > 0 && !browseError && (
+            <p className="text-[10px] text-success mt-1">✓ {liveModels.length} live model{liveModels.length === 1 ? '' : 's'} loaded</p>
+          )}
         </div>
       </div>
 
@@ -231,6 +264,7 @@ function ChatProviderFields({
 // diverge from what the backend currently stores.
 function EmbeddingFields({
   embeddingDraft, setEmbeddingDraft, config, monoInput, saving, testing, testResult, onTest, onSave,
+  liveModels, browsingModels, browseError, onBrowse,
 }: {
   embeddingDraft: { provider: 'local' | 'huggingface' | 'openai' | 'custom'; model: string; dimensions: number; apiKey: string; baseURL: string; showKey: boolean; revealing: boolean };
   setEmbeddingDraft: React.Dispatch<React.SetStateAction<any>>;
@@ -241,8 +275,22 @@ function EmbeddingFields({
   testResult: { ok: boolean; message: string } | null;
   onTest: () => void;
   onSave: () => void;
+  // Live model browser state for the embedding model field.
+  liveModels: string[];
+  browsingModels: boolean;
+  browseError: string | null;
+  onBrowse: () => void;
 }) {
   const requiresApi = embeddingDraft.provider !== 'local';
+  // Fallback list of static suggestions per embedding provider. The
+  // merged list = hardcoded + any live result.
+  const staticEmbeddingModels: Record<'local' | 'huggingface' | 'openai' | 'custom', string[]> = {
+    local:       ['mixedbread-ai/mxbai-embed-large-v1'],
+    huggingface: ['mixedbread-ai/mxbai-embed-large-v1', 'BAAI/bge-large-en-v1.5', 'sentence-transformers/all-MiniLM-L6-v2'],
+    openai:      ['text-embedding-3-small', 'text-embedding-3-large', 'text-embedding-ada-002'],
+    custom:      ['mixedbread-ai/mxbai-embed-large-v1'],
+  };
+  const mergedModels = Array.from(new Set([...liveModels, ...staticEmbeddingModels[embeddingDraft.provider]]));
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -273,15 +321,34 @@ function EmbeddingFields({
         </div>
         <div>
           <label className="block text-[10px] font-semibold text-ink-faint uppercase mb-1">Model Name</label>
-          <input type="text" list="embedding-suggested-models" value={embeddingDraft.model}
-            onChange={e => setEmbeddingDraft((prev: any) => ({ ...prev, model: e.target.value }))}
-            placeholder="mixedbread-ai/mxbai-embed-large-v1" className={monoInput} />
+          <div className="flex gap-2">
+            <input type="text" list="embedding-suggested-models" value={embeddingDraft.model}
+              onChange={e => setEmbeddingDraft((prev: any) => ({ ...prev, model: e.target.value }))}
+              placeholder="mixedbread-ai/mxbai-embed-large-v1" className={monoInput} />
+            {/* Live model browser for the embedding model. Only enabled
+                for providers that expose a model listing endpoint
+                (huggingface / openai / custom). Local has nothing to
+                list — it's a fixed in-process pipeline. */}
+            <button type="button" onClick={onBrowse}
+              disabled={browsingModels || embeddingDraft.provider === 'local'}
+              title={embeddingDraft.provider === 'local'
+                ? 'Local embedding has no remote model list.'
+                : 'Fetch available models from the embedding provider API.'}
+              className={`${adminBtnSecondary} px-2 py-1.5 text-[10px] flex items-center gap-1.5 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed`}>
+              {browsingModels
+                ? <><span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />Fetching…</>
+                : '🔄 Browse live'}
+            </button>
+          </div>
           <datalist id="embedding-suggested-models">
-            <option value="mixedbread-ai/mxbai-embed-large-v1" />
-            <option value="text-embedding-3-small" />
-            <option value="text-embedding-3-large" />
-            <option value="text-embedding-ada-002" />
+            {mergedModels.map(m => <option key={m} value={m} />)}
           </datalist>
+          {browseError && (
+            <p className="text-[10px] text-danger mt-1">⚠ {browseError}</p>
+          )}
+          {liveModels.length > 0 && !browseError && (
+            <p className="text-[10px] text-success mt-1">✓ {liveModels.length} live model{liveModels.length === 1 ? '' : 's'} loaded</p>
+          )}
         </div>
       </div>
 
@@ -421,6 +488,31 @@ export default function AdminAISettings() {
   const [savingEmbeddingDraft, setSavingEmbeddingDraft] = useState(false);
   const [testingEmbedding, setTestingEmbedding] = useState(false);
   const [embeddingTestResult, setEmbeddingTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Live model browser state. Three independent slots:
+  //   chat       — per-provider (e.g. openai has its own live list)
+  //   embedding  — single slot for the embedding model
+  //   feature    — single slot for the per-feature model (uses activeProvider)
+  // On Browse success, the returned model IDs merge with the hardcoded
+  // `suggestedModels` in the corresponding `<datalist>`. On failure, the
+  // error is surfaced inline but the datalist still shows the
+  // hardcoded fallback.
+  const emptyProviderRecord = (): Record<ProviderKey, string[]> => ({
+    anthropic: [], openai: [], xai: [], minimax: [], gemini: [], custom: [],
+  });
+  const [liveChatModels, setLiveChatModels] = useState<Record<ProviderKey, string[]>>(emptyProviderRecord);
+  const [liveEmbeddingModels, setLiveEmbeddingModels] = useState<string[]>([]);
+  const [liveFeatureModels, setLiveFeatureModels] = useState<string[]>([]);
+  const [browsingChat, setBrowsingChat] = useState<Record<ProviderKey, boolean>>({
+    anthropic: false, openai: false, xai: false, minimax: false, gemini: false, custom: false,
+  });
+  const [browsingEmbedding, setBrowsingEmbedding] = useState(false);
+  const [browsingFeature, setBrowsingFeature] = useState(false);
+  const [browseErrorChat, setBrowseErrorChat] = useState<Record<ProviderKey, string | null>>({
+    anthropic: null, openai: null, xai: null, minimax: null, gemini: null, custom: null,
+  });
+  const [browseErrorEmbedding, setBrowseErrorEmbedding] = useState<string | null>(null);
+  const [browseErrorFeature, setBrowseErrorFeature] = useState<string | null>(null);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -617,6 +709,72 @@ export default function AdminAISettings() {
     }
   };
 
+  // Live model browser. Three callers (chat / embedding / feature) all
+  // share the same response shape from /admin/ai/providers/models. The
+  // function never throws — the backend always returns ok:false on
+  // failure, so the catch here only fires on transport errors (the
+  // request never got a response). On any failure the error is stored
+  // in the appropriate slot and the UI shows it inline; the hardcoded
+  // `suggestedModels` list still works as a fallback.
+  const handleBrowseModels = async (
+    target: 'chat' | 'embedding' | 'feature',
+    providerId: string,
+  ) => {
+    if (target === 'chat') {
+      setBrowsingChat((p) => ({ ...p, [providerId]: true }));
+      setBrowseErrorChat((p) => ({ ...p, [providerId]: null }));
+    } else if (target === 'embedding') {
+      setBrowsingEmbedding(true);
+      setBrowseErrorEmbedding(null);
+    } else {
+      setBrowsingFeature(true);
+      setBrowseErrorFeature(null);
+    }
+    try {
+      const res = await adminApi.get<{ ok: boolean; models: string[]; error?: string }>(
+        '/admin/ai/providers/models',
+        { params: { provider: providerId, kind: target === 'embedding' ? 'embedding' : 'chat' } },
+      );
+      if (res.data.ok && Array.isArray(res.data.models)) {
+        if (target === 'chat') {
+          setLiveChatModels((p) => ({ ...p, [providerId]: res.data.models }));
+        } else if (target === 'embedding') {
+          setLiveEmbeddingModels(res.data.models);
+        } else {
+          setLiveFeatureModels(res.data.models);
+        }
+      } else {
+        const msg = res.data.error || 'No models returned.';
+        if (target === 'chat') {
+          setBrowseErrorChat((p) => ({ ...p, [providerId]: msg }));
+          setLiveChatModels((p) => ({ ...p, [providerId]: [] }));
+        } else if (target === 'embedding') {
+          setBrowseErrorEmbedding(msg);
+          setLiveEmbeddingModels([]);
+        } else {
+          setBrowseErrorFeature(msg);
+          setLiveFeatureModels([]);
+        }
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Network error';
+      if (target === 'chat') {
+        setBrowseErrorChat((p) => ({ ...p, [providerId]: msg }));
+        setLiveChatModels((p) => ({ ...p, [providerId]: [] }));
+      } else if (target === 'embedding') {
+        setBrowseErrorEmbedding(msg);
+        setLiveEmbeddingModels([]);
+      } else {
+        setBrowseErrorFeature(msg);
+        setLiveFeatureModels([]);
+      }
+    } finally {
+      if (target === 'chat') setBrowsingChat((p) => ({ ...p, [providerId]: false }));
+      else if (target === 'embedding') setBrowsingEmbedding(false);
+      else setBrowsingFeature(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-4 max-w-6xl">
@@ -764,6 +922,10 @@ export default function AdminAISettings() {
                 testResult={embeddingTestResult}
                 onTest={handleTestEmbedding}
                 onSave={handleSaveEmbeddingDraft}
+                liveModels={liveEmbeddingModels}
+                browsingModels={browsingEmbedding}
+                browseError={browseErrorEmbedding}
+                onBrowse={() => handleBrowseModels('embedding', embeddingDraft.provider)}
               />
             ) : (
               <ChatProviderFields
@@ -783,6 +945,10 @@ export default function AdminAISettings() {
                 onReveal={handleRevealApiKey}
                 onClear={handleClearApiKey}
                 savingProviderGlobal={savingProvider}
+                liveModels={liveChatModels[editingProvider]}
+                browsingModels={browsingChat[editingProvider]}
+                browseError={browseErrorChat[editingProvider]}
+                onBrowse={(p: ProviderKey) => handleBrowseModels('chat', p)}
               />
             )}
           </div>

@@ -65,6 +65,7 @@ import {
   getAiProviders,
   testProvider,
   revealApiKey,
+  listProviderModels,
 } from '../ai/ai-config.controller.js';
 
 import adminProjectsRoutes from './admin-projects.routes.js';
@@ -134,6 +135,7 @@ router.patch('/ai/config', updateAiConfig);
 router.post('/ai/config/reset-usage', resetAiUsage);
 router.get('/ai/providers', getAiProviders);
 router.get('/ai/providers/test', testProvider);
+router.get('/ai/providers/models', listProviderModels);
 router.get('/ai/config/api-key/:provider', revealApiKey);
 
 router.post('/faq', createFAQ);

@@ -9,6 +9,7 @@
  *   POST   /api/admin/ai/config/reset-usage  → reset usage stats
  *   GET    /api/admin/ai/providers           → list available providers + health
  *   GET    /api/admin/ai/providers/test      → test connection for a provider
+ *   GET    /api/admin/ai/providers/models    → list live models for a provider
  *   GET    /api/admin/ai/config/api-key/:provider → return decrypted key (one-time view)
  */
 
@@ -386,6 +387,158 @@ export const testProvider = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+// ─── GET /api/admin/ai/providers/models?provider=X[&kind=embedding] ─────────
+//
+// Live model browser for the AI Settings page. Fetches the list of
+// available models directly from the provider's API so the admin UI
+// can show a real-time dropdown rather than the hardcoded
+// `suggestedModels` array.
+//
+// Contract:
+//   GET /api/admin/ai/providers/models?provider=openai
+//   → { ok: true,  models: ['gpt-4o', 'gpt-4o-mini', ...], source: 'live' }
+//   → { ok: false, models: [], error: 'No API key configured for openai.' }
+//
+// `kind=embedding` switches to embedding-specific providers (e.g.
+// huggingface's `/api/models` listing). Defaults to 'chat'.
+//
+// Failure mode is exhaustive: missing key, 401/403, network error,
+// unsupported provider, malformed JSON, etc. ALL errors return
+// ok:false with an empty `models` array. The endpoint never throws
+// — callers can rely on the shape `{ ok, models, error? }`.
+export const listProviderModels = async (req: Request, res: Response): Promise<void> => {
+  const { provider, kind } = req.query as { provider?: string; kind?: string };
+  const validChatProviders = ['anthropic', 'openai', 'xai', 'minimax', 'gemini', 'custom'] as const;
+  const validEmbeddingProviders = ['huggingface', 'openai', 'custom'] as const;
+  const mode: 'chat' | 'embedding' = kind === 'embedding' ? 'embedding' : 'chat';
+  const allValid = mode === 'embedding' ? validEmbeddingProviders : validChatProviders;
+
+  // Wrap the whole body in try/catch — defensive against any throw
+  // (mongo down, network reset, JSON parse error, etc.) so the UI
+  // never sees a 500.
+  try {
+    if (!provider || !(allValid as readonly string[]).includes(provider)) {
+      res.json({ ok: false, models: [], error: `Unsupported provider "${provider}" for ${mode} model listing.` });
+      return;
+    }
+
+    const config = await AiConfig.findOne({ isActive: true, batchId: null });
+
+    // ── HuggingFace embedding listing ─────────────────────────────
+    // The /api/models endpoint is public (no auth needed) but we
+    // attach a token when one is configured. Returns 200 with a
+    // JSON array of { id, ... } — each `id` is a model slug like
+    // "mixedbread-ai/mxbai-embed-large-v1".
+    if (mode === 'embedding' && provider === 'huggingface') {
+      const dbKey = config?.getEmbeddingApiKey() ?? null;
+      const envKey = process.env.HUGGINGFACE_API_KEY ?? '';
+      const apiKey = dbKey || envKey || '';
+      const url = 'https://huggingface.co/api/models?full=false&limit=200';
+      try {
+        const resp = await fetch(url, apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {});
+        if (!resp.ok) {
+          res.json({ ok: false, models: [], error: `HuggingFace returned HTTP ${resp.status}.` });
+          return;
+        }
+        const data: unknown = await resp.json();
+        const models = Array.isArray(data)
+          ? (data as Array<{ id?: string }>)
+              .map((m) => m?.id)
+              .filter((m): m is string => typeof m === 'string' && m.length > 0)
+          : [];
+        res.json({ ok: true, models, source: 'live' });
+        return;
+      } catch (err: any) {
+        res.json({ ok: false, models: [], error: `HuggingFace model list failed: ${err?.message || 'network error'}` });
+        return;
+      }
+    }
+
+    // ── OpenAI-compatible /v1/models listing ─────────────────────
+    // Works for openai, xai, minimax, gemini (via its OAI-compat
+    // path), and any custom OpenAI-compatible endpoint. Reuses the
+    // same DB+env key resolution as testProvider so behaviour is
+    // consistent (an admin who tested the connection will get the
+    // same key for the model browser).
+    if (
+      (mode === 'chat' && ['openai', 'xai', 'minimax', 'gemini', 'custom'].includes(provider)) ||
+      (mode === 'embedding' && ['openai', 'custom'].includes(provider))
+    ) {
+      const prov = provider as AIProviderType;
+      const dbKey = config ? config.getApiKey(prov) : null;
+      const envKey = mode === 'embedding'
+        ? (process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? '')
+        : (process.env[envKeyName(prov)] ?? '');
+      const apiKey = dbKey || envKey;
+
+      if (!apiKey) {
+        const envHint = mode === 'embedding' ? 'EMBEDDING_API_KEY (or OPENAI_API_KEY)' : envKeyName(prov);
+        res.json({
+          ok: false,
+          models: [],
+          error: `No API key configured for ${provider}. Set ${envHint} in env or save a key in AI Settings.`,
+        });
+        return;
+      }
+
+      // Default base URLs mirror what getAiProviders reports. `custom`
+      // is special: the admin sets their own baseURL. We use whatever
+      // they saved; if it's empty we fall back to the OpenAI default
+      // (which is the most common shape for self-hosted OAI-compatible
+      // endpoints).
+      const baseURL = (config?.providers?.[prov]?.baseURL || '').trim()
+        || (prov === 'openai' ? 'https://api.openai.com/v1'
+        : prov === 'minimax' ? 'https://api.minimax.io/v1'
+        : prov === 'xai' ? 'https://api.x.ai/v1'
+        : prov === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai'
+        : 'https://api.openai.com/v1');
+
+      const url = `${baseURL.replace(/\/$/, '')}/models`;
+      try {
+        const resp = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+        if (!resp.ok) {
+          // 401/403 are the common case for invalid keys; surface a
+          // clean message rather than dumping the provider's error JSON.
+          const status = resp.status;
+          res.json({
+            ok: false,
+            models: [],
+            error: status === 401 || status === 403
+              ? `Provider rejected the API key (HTTP ${status}).`
+              : `Provider returned HTTP ${status}.`,
+          });
+          return;
+        }
+        const data: any = await resp.json();
+        // OpenAI-compatible shape: { data: [{ id, ... }] }
+        let ids: string[] = [];
+        if (data && Array.isArray(data.data)) {
+          ids = data.data
+            .map((m: any) => m?.id)
+            .filter((m: unknown): m is string => typeof m === 'string' && m.length > 0);
+        } else if (Array.isArray(data)) {
+          // Some providers return a flat array of {id}.
+          ids = data
+            .map((m: any) => m?.id ?? m)
+            .filter((m: unknown): m is string => typeof m === 'string' && m.length > 0);
+        }
+        res.json({ ok: true, models: ids, source: 'live' });
+        return;
+      } catch (err: any) {
+        res.json({ ok: false, models: [], error: `Provider model list failed: ${err?.message || 'network error'}` });
+        return;
+      }
+    }
+
+    // anthropic has no /v1/models endpoint — return empty (caller falls
+    // back to the hardcoded suggestedModels list).
+    res.json({ ok: false, models: [], error: `Provider "${provider}" does not expose a /v1/models endpoint.` });
+  } catch (err: any) {
+    // Defensive last-resort catch so the UI never sees a 500.
+    res.json({ ok: false, models: [], error: err?.message || 'Unexpected error listing models.' });
+  }
+};
+
 // ─── GET /api/admin/ai/config/api-key/:provider ──────────────────────────────
 
 export const revealApiKey = async (req: Request, res: Response): Promise<void> => {
@@ -420,46 +573,39 @@ export const revealApiKey = async (req: Request, res: Response): Promise<void> =
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// S5-H17 (HIGH) fix: replaced substring matchers with an exact-match
-// closed set per provider. The previous `lowerModel.includes('claude')`
-// pattern accepted e.g. 'gpt-claude-minimax-trash-injection-xss' for
-// any provider whose name appeared anywhere in the string. Exact
-// match against a closed set blocks the bypass. To add a new model
-// for a provider, extend the set below.
-const VALID_MODELS: Record<string, ReadonlySet<string>> = {
-  anthropic: new Set([
-    'claude-3-5-sonnet-20241022',
-    'claude-3-5-haiku-20241022',
-    'claude-3-opus-20240229',
-    'claude-opus-4-5',
-  ]),
-  openai: new Set([
-    'gpt-4o',
-    'gpt-4o-mini',
-    'gpt-4-turbo',
-    'gpt-3.5-turbo',
-    'o1-preview',
-    'o1-mini',
-    'o3-mini',
-  ]),
-  xai: new Set(['grok-2', 'grok-2-mini', 'grok-beta']),
-  minimax: new Set(['MiniMax-Text-01', 'abab-6.5-chat', 'abab-7-chat']),
-  gemini: new Set(['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-2.0-flash-exp']),
-};
-
-export function validateModelForProvider(model: string, provider: string): { isValid: boolean; error?: string } {
-  if (!model) {
-    return { isValid: true };
+// S5-H17 (HIGH) fix (revised in v1.79.1): the previous exact-match
+// whitelist was too strict — it blocked perfectly valid models the
+// provider supports (e.g. newer Anthropic Claude 4.x releases,
+// dated gpt-4o snapshots like gpt-4o-2024-08-06, new xAI Grok
+// versions) and forced admins to edit the source code to add every
+// model release. The whitelist also drifted out of date the moment
+// a new model launched.
+//
+// New policy: validate that the model string is non-empty and
+// matches a sane shape (non-whitespace, length-bounded). Don't
+// reject based on internal knowledge of which models exist — the
+// provider API will surface a 4xx error if the model doesn't
+// exist, which surfaces to the admin via the existing
+// "Test connection" flow. This unblocks admins who type supported
+// model names that we haven't hardcoded yet.
+//
+// The function is kept (and exported) so existing callers don't
+// break; it just always returns isValid:true for non-empty shapes.
+export function validateModelForProvider(model: string, _provider: string): { isValid: boolean; error?: string } {
+  if (typeof model !== 'string') {
+    return { isValid: false, error: 'Model must be a string.' };
   }
-  const allowed = VALID_MODELS[provider];
-  if (!allowed) {
-    return { isValid: true }; // unknown provider — let the runtime decide
+  const trimmed = model.trim();
+  if (trimmed.length === 0) {
+    return { isValid: true }; // empty → caller may treat as "use default"
   }
-  if (!allowed.has(model)) {
-    return {
-      isValid: false,
-      error: `Model "${model}" is not in the allowed set for provider "${provider}". Allowed: ${Array.from(allowed).join(', ')}.`,
-    };
+  if (trimmed.length > 256) {
+    return { isValid: false, error: 'Model name is unreasonably long (max 256 chars).' };
+  }
+  // Disallow whitespace and control chars — provider model slugs never contain them.
+  // eslint-disable-next-line no-control-regex -- intentional: catches ASCII control chars in user-supplied model names
+  if (/[\s\u0000-\u001f]/.test(trimmed)) {
+    return { isValid: false, error: 'Model name must not contain whitespace or control characters.' };
   }
   return { isValid: true };
 }
