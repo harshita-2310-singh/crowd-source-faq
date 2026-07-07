@@ -132,16 +132,24 @@ export const refreshSchema = z.object({
 });
 
 // ─── Search ─────────────────────────────────────────────────────────────────────
+// v1.79.1 (HOTFIX) — schema renamed `q` → `query` so it matches the
+// shape the frontend POSTs (`SearchBar.tsx`, `InteractiveSearchOverlay.tsx`).
+// Previously every request returned 400 with `{ field: 'q', message: 'Required' }`
+// even though the body contained `query`. The `limit`/`page`/`source` fields
+// are dropped because the controller doesn't use them — keeping them
+// required-as-defaults would silently bind the controller to unused knobs.
 export const searchSchema = z.object({
-  q:      z.string().min(1),
-  page:   z.coerce.number().int().min(1).default(1),
-  limit:  z.coerce.number().int().min(1).max(50).default(10),
-  source: z.enum(['all', 'faq', 'community']).optional(),
+  query: z.string().min(1).max(200),
+  batchId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
 });
 
+// v1.79.1 (HOTFIX) — `feedback` was being POSTed by `SearchFeedback.tsx`
+// but the schema didn't declare it, so Zod's `.object()` rejected the
+// unknown key → 400. Added as optional to match the controller's read.
 export const submitUnresolvedSchema = z.object({
-  query:  z.string().min(1).max(500),
-  faqId:  z.string().regex(/^[0-9a-fA-F]{24}$/).nullish(),
+  query:    z.string().min(1).max(500),
+  faqId:    z.string().regex(/^[0-9a-fA-F]{24}$/).nullish(),
+  feedback: z.string().max(2000).optional(),
 });
 
 export const resolveUnresolvedSchema = z.object({

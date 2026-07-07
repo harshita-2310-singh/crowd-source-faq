@@ -57,15 +57,22 @@ export const inputStandardRing  = 'w-full bg-bg border border-border rounded-lg 
  * Pre-split refactor, the .btn-base / .btn-primary / .btn-secondary /
  * .btn-ghost / .btn-outline / .btn-danger / .btn-warn / .btn-success
  * styles lived in index.css. The CSS-split refactor removed them, but
- * 20+ components still reference the class names. Rather than do a
- * 20-file migration in a hotfix, re-export the equivalent Tailwind
- * utility strings here so those references keep working AND match the
- * design system. New code should prefer adminBtnPrimary etc. above. */
-export const btnBase       = 'inline-flex items-center justify-center gap-2 font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
-export const btnPrimary    = 'btn-base bg-accent text-accent-text hover:bg-accent-hover active:bg-accent-hover/90 shadow-sm';
-export const btnSecondary  = 'btn-base bg-bg-secondary text-ink border border-border hover:bg-mist active:bg-mist/80';
-export const btnGhost      = 'btn-base text-ink-soft hover:text-ink hover:bg-mist/60 active:bg-mist';
-export const btnOutline    = 'btn-base border border-border text-ink hover:bg-mist active:bg-mist/80';
-export const btnDanger     = 'btn-base bg-danger text-white hover:bg-danger/85 active:bg-danger/80';
-export const btnWarn       = 'btn-base bg-warning text-white hover:bg-warning/85 active:bg-warning/80';
-export const btnSuccess    = 'btn-base bg-success text-white hover:bg-success/85 active:bg-success/80';
+ * 20+ components still reference the class names. Re-export the
+ * equivalent Tailwind utility strings here so those references keep
+ * working AND match the design system.
+ *
+ * v1.79.1 (HOTFIX) — the variants originally referenced `btn-base` as
+ * a CSS class name (which no longer exists), so concatenating
+ * `${btnBase} ${btnPrimary}` produced a button that was missing padding
+ * and border-radius (looked like a dark unstyled block in screenshots).
+ * Fix: each variant inlines the shared base classes directly so the
+ * const works standalone OR concatenated. New code should still prefer
+ * the admin-prefixed variants above for admin UI. */
+export const btnBase       = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
+export const btnPrimary    = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 bg-accent text-accent-text hover:bg-accent-hover active:bg-accent-hover/90 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
+export const btnSecondary  = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 bg-bg-secondary text-ink border border-border hover:bg-mist active:bg-mist/80 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
+export const btnGhost      = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 text-ink-soft hover:text-ink hover:bg-mist/60 active:bg-mist disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
+export const btnOutline    = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 border border-border text-ink hover:bg-mist active:bg-mist/80 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
+export const btnDanger     = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 bg-danger text-white hover:bg-danger/85 active:bg-danger/80 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
+export const btnWarn       = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 bg-warning text-white hover:bg-warning/85 active:bg-warning/80 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
+export const btnSuccess    = 'inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 bg-success text-white hover:bg-success/85 active:bg-success/80 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30';
