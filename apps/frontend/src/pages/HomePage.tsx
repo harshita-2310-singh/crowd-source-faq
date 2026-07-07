@@ -675,9 +675,24 @@ export default function HomePage() {
         {error && !loading && (
           <div className="mt-8 rounded-2xl bg-danger-light border border-danger/15 p-6 text-center space-y-3">
             <p className="text-sm text-danger font-medium">{error}</p>
+            {/* 1.10 (LOW) — disable the Retry button while a fetch is
+                in flight so a double-click cannot fire two parallel
+                /faq requests. The other data sources fail soft in the
+                effect above, so retrying here only re-fetches /faq. */}
             <button
-              onClick={() => { setError(''); setLoading(true); api.get('/faq').then(res => { setGrouped(res.data.grouped || {}); setTotal(res.data.total || 0); }).catch((err: unknown) => { const m = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load FAQs.'; setError(m); }).finally(() => setLoading(false)); }}
-              className="px-5 py-2 text-sm font-medium bg-danger text-accent-text rounded-full hover:bg-danger/90 transition-colors"
+              onClick={() => {
+                setError('');
+                setLoading(true);
+                api.get('/faq', { params: batchId ? { batchId } : undefined })
+                  .then((res) => { setGrouped(res.data.grouped || {}); setTotal(res.data.total || 0); })
+                  .catch((err: unknown) => {
+                    const m = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load FAQs.';
+                    setError(m);
+                  })
+                  .finally(() => setLoading(false));
+              }}
+              disabled={loading}
+              className="px-5 py-2 text-sm font-medium bg-danger text-accent-text rounded-full hover:bg-danger/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Retry
             </button>

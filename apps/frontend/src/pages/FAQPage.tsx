@@ -69,27 +69,42 @@ export default function FAQPage() {
   const noProgramSelected = !batchId;
 
   // ── Fetch all FAQs when batchId changes ─────────────────────────
-  useEffect(() => {
+  //
+  // 1.8 (LOW) — the previous retry button re-fired `api.get('/faq')`
+  // WITHOUT the batchId param, dropping the active program filter
+  // when the user hit a transient error and tapped Retry. Hoist the
+  // fetch into a `load()` helper that closes over the current
+  // `batchId`; both the effect and the retry button call it.
+  //
+  // 1.10 (LOW) — the inline retry handler had no in-flight guard, so
+  // a double-click could fire two parallel `/faq` requests whose
+  // responses could race. Track in-flight in a ref so a second call
+  // from anywhere (Retry button, programmatic, etc.) no-ops while a
+  // fetch is pending. The state-based `loading` flag drives the UI
+  // disabled state.
+  const inFlightRef = useRef(false);
+  const load = useCallback(async (): Promise<void> => {
     if (!batchId) return;
-    let mounted = true;
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
-
-    // /api/faq — full grouped list
-    api.get('/faq', { params: { batchId } })
-      .then((res) => {
-        if (!mounted) return;
-        setGrouped(applyQuestionNumbers(res.data.grouped || {}));
-        setTotal(res.data.total || 0);
-      })
-      .catch((err: unknown) => {
-        if (!mounted) return;
-        const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load FAQs. Please try again.';
-        setError(message);
-      })
-      .finally(() => { if (mounted) setLoading(false); });
-
-    return () => { mounted = false; };
+    try {
+      const res = await api.get('/faq', { params: { batchId } });
+      setGrouped(applyQuestionNumbers(res.data.grouped || {}));
+      setTotal(res.data.total || 0);
+      setError('');
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load FAQs. Please try again.';
+      setError(message);
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
+    }
   }, [batchId]);
+
+  useEffect(() => {
+    void load();
+  }, [batchId, load]);
 
   // ── Derived data ─────────────────────────────────────────────────────────
   const categories = useMemo(() => Object.keys(grouped).sort((a, b) => {
@@ -389,9 +404,13 @@ export default function FAQPage() {
         {error && !loading && (
           <div className="mt-8 rounded-2xl bg-danger-light border border-danger/15 p-6 text-center space-y-3">
             <p className="text-sm text-danger font-medium">{error}</p>
+            {/* 1.8 + 1.10 — call the shared load() helper so Retry
+                keeps the batchId param AND is disabled while a fetch
+                is already in flight. */}
             <button
-              onClick={() => { setError(''); setLoading(true); api.get('/faq').then(res => { setGrouped(applyQuestionNumbers(res.data.grouped || {})); setTotal(res.data.total || 0); }).catch((err: unknown) => { const m = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load FAQs.'; setError(m); }).finally(() => setLoading(false)); }}
-              className="px-5 py-2 text-sm font-medium bg-danger text-accent-text rounded-full hover:bg-danger/90 transition-colors"
+              onClick={() => { void load(); }}
+              disabled={loading}
+              className="px-5 py-2 text-sm font-medium bg-danger text-accent-text rounded-full hover:bg-danger/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Retry
             </button>

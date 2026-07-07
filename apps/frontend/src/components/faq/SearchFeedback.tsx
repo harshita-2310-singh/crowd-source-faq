@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 
 interface SearchFeedbackProps {
@@ -13,9 +13,21 @@ export default function SearchFeedback({ searchQuery, resultFaqId }: SearchFeedb
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // 1.5 (MEDIUM) — the previous 8-second timer unconditionally reset
+  // dismissed back to false, so the prompt popped back up after the
+  // user had explicitly closed it. Track dismissal in a ref so the
+  // timer callback can bail early and never re-show the prompt after
+  // an explicit "Yes, I am good" / Cancel / close click.
+  const dismissedRef = useRef(false);
+  useEffect(() => { dismissedRef.current = dismissed; }, [dismissed]);
+
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDismissed(false);
+      // Only re-show the prompt if the user has not explicitly
+      // dismissed it. We read the latest value through the ref so
+      // this effect (keyed on searchQuery/resultFaqId) doesn't need
+      // dismissed in its dep array.
+      if (dismissedRef.current) return;
       setPhase('prompt');
     }, 8000);
     return () => clearTimeout(timer);

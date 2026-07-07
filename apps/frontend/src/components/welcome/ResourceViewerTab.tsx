@@ -56,6 +56,23 @@ const KIND_LABELS: Record<ResourceKind, string> = {
   link: 'External link',
 };
 
+// 1.4 (MEDIUM) — admin-supplied resource URLs go into <a href>,
+// <iframe src>, <video src>, <img src>, and fetch(). A `javascript:`
+// scheme in any of those becomes an XSS sink (the `rel="noopener
+// noreferrer"` attribute does NOT stop `javascript:` in an anchor).
+// Reject anything that isn't a safe http(s)/blob/data URL and have
+// the row components render a fallback card when this returns null.
+function safeResourceUrl(value: string | undefined | null): string | null {
+  if (!value || typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v) return null;
+  // Allow http(s), mailto, blob (rare but legitimate), and data: for
+  // small embedded resources. Block everything else — most importantly
+  // javascript: and vbscript:.
+  if (/^(https?:|mailto:|blob:|data:image\/)/i.test(v)) return v;
+  return null;
+}
+
 interface Props {
   /** Optional: if omitted, the active program header is used. */
   refreshKey?: string | number;
@@ -222,23 +239,39 @@ interface RowProps {
 }
 
 function ResourceRow({ resource, completed, onComplete }: RowProps): React.ReactElement {
-  switch (resource.kind) {
+  // 1.4 — sanitize the admin-supplied URL before any of the row
+  // renderers consume it. If the URL is unsafe (e.g. javascript:),
+  // surface an explicit "Unsupported URL scheme" card rather than
+  // render the value into a DOM sink.
+  const safeUrl = safeResourceUrl(resource.url);
+  if (!safeUrl) {
+    return (
+      <div className="space-y-2">
+        <HeaderRow resource={resource} completed={completed} />
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p>Unsupported URL scheme. Admins must publish resource URLs with an http(s) scheme.</p>
+        </div>
+      </div>
+    );
+  }
+  const safeResource = { ...resource, url: safeUrl };
+  switch (safeResource.kind) {
     case 'video':
-      return <VideoRow resource={resource} completed={completed} onComplete={onComplete} />;
+      return <VideoRow resource={safeResource} completed={completed} onComplete={onComplete} />;
     case 'pdf':
-      return <PdfRow resource={resource} completed={completed} onComplete={onComplete} />;
+      return <PdfRow resource={safeResource} completed={completed} onComplete={onComplete} />;
     case 'pptx':
-      return <PptxRow resource={resource} completed={completed} onComplete={onComplete} />;
+      return <PptxRow resource={safeResource} completed={completed} onComplete={onComplete} />;
     case 'svg':
-      return <SvgRow resource={resource} completed={completed} onComplete={onComplete} />;
+      return <SvgRow resource={safeResource} completed={completed} onComplete={onComplete} />;
     case 'markdown':
-      return <MarkdownRow resource={resource} completed={completed} onComplete={onComplete} />;
+      return <MarkdownRow resource={safeResource} completed={completed} onComplete={onComplete} />;
     case 'txt':
-      return <TxtRow resource={resource} completed={completed} onComplete={onComplete} />;
+      return <TxtRow resource={safeResource} completed={completed} onComplete={onComplete} />;
     case 'link':
-      return <LinkRow resource={resource} completed={completed} onComplete={onComplete} />;
+      return <LinkRow resource={safeResource} completed={completed} onComplete={onComplete} />;
     default:
-      return <UnsupportedRow resource={resource} />;
+      return <UnsupportedRow resource={safeResource} />;
   }
 }
 
@@ -538,15 +571,30 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
 
 function TxtRow({ resource, completed, onComplete }: RowProps): React.ReactElement {
   const [body, setBody] = useState<string>('');
+  // 1.3 (MEDIUM) — fetch() against a CDN may fail with a CORS error
+  // that .then() never runs for, leaving the <pre> blank and the user
+  // thinking the resource is empty. Track the failure so we can show
+  // an "open in new tab" fallback (same UX PptxRow/SvgRow use).
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const threshold = Math.max(5, resource.completionThreshold);
   const { elapsed, start } = useElapsedTimer(true, threshold, onComplete);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
     fetch(resource.url)
-      .then((r) => r.text())
-      .then((txt) => { if (!cancelled) setBody(txt); })
-      .catch(() => { /* ignore */ });
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then((txt) => { if (!cancelled) { setBody(txt); setLoading(false); } })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(err?.message || 'Could not load this resource. The host may be blocking browser requests.');
+        setLoading(false);
+      });
     return () => { cancelled = true; };
   }, [resource.url]);
 
@@ -561,28 +609,56 @@ function TxtRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
           </span>
         }
       />
-      <div
-        className="rounded-lg border border-border bg-bg p-4 max-h-96 overflow-y-auto"
-        onMouseEnter={start}
-        onTouchStart={start}
-      >
-        <pre className="text-xs whitespace-pre-wrap">{body}</pre>
-      </div>
+      {loadError ? (
+        // 1.3 — surface the CORS/network failure with a fallback link.
+        // Same pattern as the existing SvgRow imgError fallback.
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p>Inline preview unavailable: {loadError}</p>
+          <a href={resource.url} target="_blank" rel="noopener noreferrer"
+            className="text-sm text-accent underline mt-1 inline-block">
+            Open text in new tab
+          </a>
+        </div>
+      ) : (
+        <div
+          className="rounded-lg border border-border bg-bg p-4 max-h-96 overflow-y-auto"
+          onMouseEnter={start}
+          onTouchStart={start}
+        >
+          {loading ? (
+            <p className="text-xs text-ink-faint">Loading…</p>
+          ) : (
+            <pre className="text-xs whitespace-pre-wrap">{body}</pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 function MarkdownRow({ resource, completed, onComplete }: RowProps): React.ReactElement {
   const [body, setBody] = useState<string>('');
+  // 1.3 (MEDIUM) — same CORS-failure fallback as TxtRow.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const threshold = Math.max(5, resource.completionThreshold);
   const { elapsed, start } = useElapsedTimer(true, threshold, onComplete);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
     fetch(resource.url)
-      .then((r) => r.text())
-      .then((txt) => { if (!cancelled) setBody(txt); })
-      .catch(() => { /* ignore */ });
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then((txt) => { if (!cancelled) { setBody(txt); setLoading(false); } })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(err?.message || 'Could not load this resource. The host may be blocking browser requests.');
+        setLoading(false);
+      });
     return () => { cancelled = true; };
   }, [resource.url]);
 
@@ -597,13 +673,27 @@ function MarkdownRow({ resource, completed, onComplete }: RowProps): React.React
           </span>
         }
       />
-      <div
-        className="rounded-lg border border-border bg-bg p-4 max-h-96 overflow-y-auto"
-        onMouseEnter={start}
-        onTouchStart={start}
-      >
-        <pre className="text-xs whitespace-pre-wrap">{body}</pre>
-      </div>
+      {loadError ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p>Inline preview unavailable: {loadError}</p>
+          <a href={resource.url} target="_blank" rel="noopener noreferrer"
+            className="text-sm text-accent underline mt-1 inline-block">
+            Open markdown in new tab
+          </a>
+        </div>
+      ) : (
+        <div
+          className="rounded-lg border border-border bg-bg p-4 max-h-96 overflow-y-auto"
+          onMouseEnter={start}
+          onTouchStart={start}
+        >
+          {loading ? (
+            <p className="text-xs text-ink-faint">Loading…</p>
+          ) : (
+            <pre className="text-xs whitespace-pre-wrap">{body}</pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }

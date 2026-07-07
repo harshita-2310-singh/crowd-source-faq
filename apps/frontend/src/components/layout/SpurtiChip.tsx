@@ -21,7 +21,11 @@ import { useAuth } from '../../hooks/useAuth';
  */
 export default function SpurtiChip(): React.ReactElement | null {
   const { user } = useAuth();
-  const userId = user?.id ?? null;
+  // 1.1 (HIGH) — User shape uses `_id`, never `id`. Reading `user?.id`
+  // returns undefined for every real user, so the early-return below
+  // hid the chip (and the v1.65 SP currency system / Golden Ticket
+  // funder) entirely. Fix: read `_id`.
+  const userId = user?._id ?? null;
   const [sp, setSp] = useState<number | null>(null);
 
   useEffect(() => {

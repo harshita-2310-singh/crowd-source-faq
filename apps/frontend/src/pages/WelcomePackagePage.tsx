@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import OrientationTab from '../components/welcome/OrientationTab';
@@ -59,15 +59,26 @@ export default function WelcomePackagePage() {
   // conditional layout. We pass the active program's batchId
   // explicitly so the backend scopes correctly even on first mount
   // before the localStorage interceptor has populated.
+  //
+  // 1.2 (MEDIUM) — Previously this effect listed `activeTab` in its
+  // dep array. Every tab switch re-fetched orientation + resources
+  // even though those APIs are program-scoped, not tab-scoped. Worse,
+  // a late-arriving orientation response could clobber the resources
+  // section's loaded flag via the stale closure. Fix:
+  //   (a) drop `activeTab` from deps (program is the only meaningful input)
+  //   (b) use a fetch-id ref so the response from a superseded (cancelled)
+  //       fetch can never overwrite the newer one
+  const lastFetchIdRef = useRef(0);
   useEffect(() => {
     let cancelled = false;
+    const fetchId = ++lastFetchIdRef.current;
     const params = currentProgram?._id ? { batchId: currentProgram._id } : {};
     Promise.all([
       api.get('/welcome/orientation', { params }).catch(() => ({ data: null })),
       api.get('/welcome/resources', { params }).catch(() => ({ data: [] })),
     ])
       .then(([orientationRes, resourcesRes]) => {
-        if (cancelled) return;
+        if (cancelled || fetchId !== lastFetchIdRef.current) return;
         const orientation = orientationRes?.data;
         const resources = resourcesRes?.data || [];
         setSections({
@@ -77,11 +88,11 @@ export default function WelcomePackagePage() {
         });
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || fetchId !== lastFetchIdRef.current) return;
         setSections({ loaded: false, hasOrientation: false, hasResources: false });
       });
     return () => { cancelled = true; };
-  }, [currentProgram?._id, activeTab]);
+  }, [currentProgram?._id]);
 
   const tabs = (() => {
     if (!user?.orientationCompleted) {

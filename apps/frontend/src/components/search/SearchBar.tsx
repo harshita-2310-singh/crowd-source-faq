@@ -1,4 +1,4 @@
-import React, { useState, useRef, type FormEvent, type ChangeEvent } from 'react';
+import React, { useState, useRef, useEffect, type FormEvent, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import api from '../../utils/api';
@@ -52,6 +52,9 @@ const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(function Se
   const query = isControlled ? (value ?? '') : internalQuery;
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 1.6 — tracks the suggestionError auto-dismiss timer so we can
+  // clear it on the next click / unmount.
+  const suggestErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -141,14 +144,38 @@ const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(function Se
     setShowSuggestions(false);
     setSuggestions([]);
     setSuggestionError(null);
+    // 1.6 (LOW) — clear any stale suggestionError on every click so it
+    // doesn't linger indefinitely if the user stopped typing. The
+    // 4-second auto-dismiss below still applies for fresh errors.
+    if (suggestErrorTimerRef.current) {
+      clearTimeout(suggestErrorTimerRef.current);
+      suggestErrorTimerRef.current = null;
+    }
     try {
       const res = await api.get<{ _id: string; question: string; answer: string; category: string }>(`/faq/${faqId}`);
       sessionStorage.setItem('yaksha_faq_highlight', JSON.stringify(res.data));
     } catch {
+      // 1.6 (LOW) — auto-dismiss after 4 seconds so the red banner
+      // doesn't linger until the next fetchSuggestions cycle.
       setSuggestionError('Could not load FAQ. Navigating anyway.');
+      suggestErrorTimerRef.current = setTimeout(() => {
+        setSuggestionError(null);
+        suggestErrorTimerRef.current = null;
+      }, 4000);
     }
     navigate(`/faq/${faqId}`);
   };
+
+  // 1.6 — clear pending auto-dismiss timer on unmount so we don't
+  // try to setState after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (suggestErrorTimerRef.current) {
+        clearTimeout(suggestErrorTimerRef.current);
+        suggestErrorTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Close suggestions on outside click
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {

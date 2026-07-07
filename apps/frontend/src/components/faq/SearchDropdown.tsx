@@ -82,18 +82,33 @@ export default function SearchDropdown({
             <p className="text-[11px] font-semibold text-ink-faint uppercase tracking-wide">
               Categories
             </p>
-            <div className="mt-2 space-y-1">
-              {categories.slice(0, 7).map((name) => (
-                <button
-                  key={name}
-                  onClick={() => onSelectCategory(name)}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-2xl border border-border/60 text-left search-list-item"
-                >
-                  <span className="opacity-40 group-hover:opacity-100 transition-opacity">{getCategoryIcon(name)}</span>
-                  <span className="text-sm text-ink">{formatCategoryName(name)}</span>
-                </button>
-              ))}
-            </div>
+            {/* 1.12 (LOW) — previously the right column rendered just
+                its <p> header with no body when categories was empty,
+                leaving a confusing gap. Surface an explicit empty
+                state instead. */}
+            {categories.length === 0 ? (
+              <div className="mt-2 rounded-2xl border border-dashed border-border bg-transparent p-4">
+                <p className="text-xs text-ink-soft">
+                  No categories to show yet.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-1">
+                {categories.slice(0, 7).map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => onSelectCategory(name)}
+                    // 1.12 (LOW) — added the `group` Tailwind class so
+                    // the icon's `group-hover:opacity-100` actually
+                    // fires when the user hovers the button.
+                    className="group w-full flex items-center gap-2 px-3 py-2 rounded-2xl border border-border/60 text-left search-list-item"
+                  >
+                    <span className="opacity-40 group-hover:opacity-100 transition-opacity">{getCategoryIcon(name)}</span>
+                    <span className="text-sm text-ink">{formatCategoryName(name)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

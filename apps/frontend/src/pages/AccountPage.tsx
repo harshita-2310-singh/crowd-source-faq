@@ -27,6 +27,12 @@ export default function AccountPage() {
   const [transcriptMeetingId, setTranscriptMeetingId] = useState<string | null>(null);
   const [transcriptProgress, setTranscriptProgress] = useState<{ stage: string; percent: number; message: string } | null>(null);
   const [transcriptSelectedFile, setTranscriptSelectedFile] = useState<{ file: File; type: 'vtt' | 'txt' } | null>(null);
+  // 2-E (MEDIUM) — topic used to be read via document.getElementById
+  // each time the user clicked Process. That DOM-read lost state when
+  // the modal opened/closed (React re-rendered the input but the DOM
+  // value wasn't in React's state model). Lift it into a real
+  // controlled input.
+  const [transcriptTopic, setTranscriptTopic] = useState('');
 
   // ─── Document Upload (OCR + AI extraction) ─────────────────────
   // v1.68 — admin/moderator only (matches the backend
@@ -149,29 +155,31 @@ export default function AccountPage() {
   // Handle Process button — show confirmation modal
   const handleTranscriptProcess = useCallback(() => {
     if (!transcriptSelectedFile) return;
-    const topic = (document.getElementById('transcript-topic') as HTMLInputElement)?.value?.trim();
+    // 2-E — read the topic from React state, not from the DOM.
+    const topic = transcriptTopic.trim();
     if (!topic) { setTranscriptMsg({ type: 'err', text: 'Add a meeting topic first.' }); return; }
     setShowProcessModal(true);
-  }, [transcriptSelectedFile]);
+  }, [transcriptSelectedFile, transcriptTopic]);
 
   // Confirmed in modal — start upload
   const confirmTranscriptProcess = useCallback(() => {
     if (!transcriptSelectedFile) return;
-    const topic = (document.getElementById('transcript-topic') as HTMLInputElement)?.value?.trim();
+    // 2-E — same: read from state.
+    const topic = transcriptTopic.trim();
     setShowProcessModal(false);
     setTranscriptMsg(null);
     setTranscriptProgress({ stage: 'queued', percent: 0, message: 'Uploading…' });
     setTranscriptUploading(true);
     const form = new FormData();
     form.append('file', transcriptSelectedFile.file);
-    form.append('meetingTopic', topic!);
+    form.append('meetingTopic', topic);
     api.post('/zoom/upload-transcript', form, { headers: { 'Content-Type': 'multipart/form-data' } })
       .then(res => { setTranscriptMeetingId(res.data.meetingId); })
       .catch((err) => {
         setTranscriptMsg({ type: 'err', text: (err as Error).message || 'Upload failed.' });
         setTranscriptUploading(false);
       });
-  }, [transcriptSelectedFile]);
+  }, [transcriptSelectedFile, transcriptTopic]);
 
   // Cancel selected file
   const handleTranscriptCancel = useCallback(() => {
@@ -413,9 +421,13 @@ export default function AccountPage() {
                 {/* Topic field — always required */}
                 <div>
                   <label htmlFor="transcript-topic" className="text-[11px] font-medium text-ink-soft mb-1.5 block">Meeting topic <span className="text-danger">*</span></label>
+                  {/* 2-E — controlled input bound to React state so the
+                      topic survives modal close→reopen cycles. */}
                   <input
                     id="transcript-topic"
                     type="text"
+                    value={transcriptTopic}
+                    onChange={(e) => setTranscriptTopic(e.target.value)}
                     placeholder="e.g. Q3 Planning, Sprint Retro, Product Review…"
                     className="w-full px-3 py-2 rounded-xl border border-border bg-bg text-sm text-ink placeholder-ink-faint/60 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/10 transition-all"
                   />

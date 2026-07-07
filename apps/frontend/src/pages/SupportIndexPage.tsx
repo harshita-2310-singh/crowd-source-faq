@@ -42,7 +42,13 @@ function SupportIndexInner(): React.ReactElement {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [navigate]);
+    // 2-A (MEDIUM) fix: previously the dep array was just `[navigate]`,
+    // omitting `q`. The effect fired once on mount and never re-ran
+    // when the URL's `?q=...` changed — so navigating to
+    // `/support?q=foo` and then changing the URL's q to `?q=bar`
+    // silently kept the old query results. Add `q` to the deps so the
+    // search-filter re-fires on URL changes.
+  }, [navigate, q]);
 
   if (loading) {
     return (

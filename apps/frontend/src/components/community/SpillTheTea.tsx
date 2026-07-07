@@ -65,11 +65,17 @@ export default function SpillTheTea() {
       );
       const newDrops = res.data.drops;
 
-      // Background poll (dropdown closed): detect new post_answered events and toast
-      if (!open && newDrops.length > 0) {
-        const latestDrop = newDrops[0];
-        // Only toast for post_answered (Admin/AI resolved) and only if it's a new drop
+      // 2-H (LOW) — previously lastSeenIdRef was only updated in the
+      // !open branch, so when the user opened the dropdown, fetchTea
+      // still compared against a possibly-stale ref on the next close.
+      // Now we always advance the ref to the most recent drop we just
+      // saw, regardless of open/closed state — that's what "last seen"
+      // semantically means.
+      const latestDrop = newDrops[0];
+      if (latestDrop) {
+        // Background poll (dropdown closed): detect new post_answered events and toast
         if (
+          !open &&
           latestDrop.eventType === 'post_answered' &&
           lastSeenIdRef.current !== null &&
           latestDrop._id !== lastSeenIdRef.current

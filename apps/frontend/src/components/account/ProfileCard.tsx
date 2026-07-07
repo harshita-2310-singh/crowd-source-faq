@@ -45,7 +45,7 @@ export default function ProfileCard() {
     setAvatarSuccess('');
     try {
       const asset = await uploadAvatar(file);
-      const res = await api.patch<{ user: { id: string; name: string; email: string; role: string; avatar: { url: string; gcsUri: string; objectPath: string } } }>('/auth/profile', {
+      const res = await api.patch<{ user: { _id: string; name: string; email: string; role: string; avatar: { url: string; gcsUri: string; objectPath: string } } }>('/auth/profile', {
         avatar: { url: asset.url, gcsUri: asset.gcsUri, objectPath: asset.objectPath },
       });
       const stored = localStorage.getItem('yaksha_user');
@@ -67,7 +67,7 @@ export default function ProfileCard() {
     setAvatarError('');
     setAvatarSuccess('');
     try {
-      const res = await api.patch<{ user: { id: string; name: string; email: string; role: string; avatar: { url: string; publicId: string } | null } }>('/auth/profile', {
+      const res = await api.patch<{ user: { _id: string; name: string; email: string; role: string; avatar: { url: string; publicId: string } | null } }>('/auth/profile', {
         avatar: null,
       });
       const stored = localStorage.getItem('yaksha_user');
@@ -91,7 +91,7 @@ export default function ProfileCard() {
     setError('');
     setSuccess('');
     try {
-      const res = await api.patch<{ user: { id: string; name: string; email: string; role: string; avatar?: { url: string; publicId: string } } }>('/auth/profile', {
+      const res = await api.patch<{ user: { _id: string; name: string; email: string; role: string; avatar?: { url: string; publicId: string } } }>('/auth/profile', {
         name: form.name.trim(),
         email: form.email.trim(),
       });

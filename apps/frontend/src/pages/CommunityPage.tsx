@@ -127,15 +127,37 @@ export default function CommunityPage() {
     }
   }, [posts, user, window.location.search]);
 
-  useEffect(() => {
-    fetchPosts(true);
-  }, [filter, sort, showAllPrograms]);
-
   // Reset cursor + posts when filter/sort changes so we paginate the
   // newly-filtered set from the beginning.
   useEffect(() => {
     setNextCursor(null);
     setPosts([]);
+  }, [filter, sort, showAllPrograms]);
+
+  // 2-D (MEDIUM) — previously this page had TWO effects both keyed on
+  // [filter, sort, ...] that each fired `fetchPosts(true)` in the same
+  // React commit, racing against each other. The earlier one (above)
+  // handled showAllPrograms, this one below handled the search-active
+  // branch. Merge them into one effect whose body is the union of
+  // both branches, removing the duplicate dispatch.
+  // When filter or sort changes — refresh posts (if no search active) or re-filter existing results
+  useEffect(() => {
+    if (search.trim()) {
+      // Search is active — re-apply filter/sort client-side to existing searchResults
+      setSearchResults(prev => {
+        if (!prev.length) return prev;
+        let filtered = [...prev];
+        if (filter === 'answered') filtered = filtered.filter(p => p.status === 'answered');
+        else if (filter === 'unanswered') filtered = filtered.filter(p => p.status === 'unanswered');
+        if (sort === 'newest') filtered.sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+        else if (sort === 'oldest') filtered.sort((a, b) => new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime());
+        else if (sort === 'popular') filtered.sort((a, b) => ((b.upvotes?.length ?? 0)) - ((a.upvotes?.length ?? 0)));
+        else if (sort === 'discussed') filtered.sort((a, b) => ((b.comments?.length ?? 0)) - ((a.comments?.length ?? 0)));
+        return filtered;
+      });
+      return;
+    }
+    fetchPosts(true);
   }, [filter, sort, showAllPrograms]);
 
   // ── Infinite scroll — fetch the next page when the sentinel enters view ────
@@ -190,26 +212,6 @@ export default function CommunityPage() {
       setTimeout(() => setToast(''), 2500);
     }
   }, [loading, syncing]);
-
-  // When filter or sort changes — refresh posts (if no search active) or re-filter existing results
-  useEffect(() => {
-    if (search.trim()) {
-      // Search is active — re-apply filter/sort client-side to existing searchResults
-      setSearchResults(prev => {
-        if (!prev.length) return prev;
-        let filtered = [...prev];
-        if (filter === 'answered') filtered = filtered.filter(p => p.status === 'answered');
-        else if (filter === 'unanswered') filtered = filtered.filter(p => p.status === 'unanswered');
-        if (sort === 'newest') filtered.sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
-        else if (sort === 'oldest') filtered.sort((a, b) => new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime());
-        else if (sort === 'popular') filtered.sort((a, b) => ((b.upvotes?.length ?? 0)) - ((a.upvotes?.length ?? 0)));
-        else if (sort === 'discussed') filtered.sort((a, b) => ((b.comments?.length ?? 0)) - ((a.comments?.length ?? 0)));
-        return filtered;
-      });
-      return;
-    }
-    fetchPosts(true);
-  }, [filter, sort]);
 
   const handlePostCreated = (newPost: Post) => {
     setPosts((prev) => [newPost, ...prev]);
@@ -450,7 +452,7 @@ export default function CommunityPage() {
                 key={post._id}
                 post={post}
                 onClick={(p) => handleOpenThread(p._id)}
-                currentUserId={user?._id || (user?.id as string | undefined)}
+                currentUserId={user?._id}
               />
             ))}
           </div>
