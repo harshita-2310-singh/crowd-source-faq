@@ -30,6 +30,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../../utils/api';
 import { useProgram } from '../../context/ProgramContext';
 import { resolveAssetUrl } from '../../utils/publicUrl';
+import { inlineDangerBanner, communityToastWarn } from '../../styles/style_config';
 
 type ResourceKind = 'video' | 'pdf' | 'pptx' | 'svg' | 'markdown' | 'txt' | 'link';
 
@@ -147,7 +148,7 @@ export default function ResourceViewerTab({ refreshKey }: Props): React.ReactEle
   return (
     <div className="space-y-6">
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">{error}</div>
+        <div className={inlineDangerBanner + ' text-sm rounded-lg px-4 py-2'}>{error}</div>
       )}
 
       <section className="bg-card border border-border rounded-xl p-6">
@@ -524,7 +525,7 @@ function SvgRow({ resource, completed, onComplete }: RowProps): React.ReactEleme
         )}
       </div>
       {imgError && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className={communityToastWarn + ' rounded-lg px-3 py-2 text-xs'}>
           <p>Inline preview unavailable: {imgError}</p>
           <a href={resource.url} target="_blank" rel="noopener noreferrer"
             className="text-sm text-accent underline mt-1 inline-block">
