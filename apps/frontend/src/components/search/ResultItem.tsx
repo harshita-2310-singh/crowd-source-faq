@@ -163,7 +163,7 @@ export default function ResultItem({ result, expanded, onToggle, onShowHistory, 
                   </button>
                   <button onClick={(e) => { e.stopPropagation(); handleVote(false); }} disabled={voted !== null}
                     className={`inline-flex items-center gap-1.5 text-xs px-3.5 py-1.5 rounded-full border transition-all duration-200 ${
-                      voted === 'unhelpful' ? 'border-red-200 bg-red-50 text-red-600' : 'border-border text-ink-faint hover:border-red-200 hover:text-red-500'
+                      voted === 'unhelpful' ? 'border-danger/40 bg-danger-light text-danger' : 'border-border text-ink-faint hover:border-danger/40 hover:text-danger'
                     } disabled:cursor-default`}>
                     <ThumbsDownIcon /><span className="font-semibold">{uhv}</span>
                   </button>
