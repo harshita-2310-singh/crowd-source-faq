@@ -82,7 +82,7 @@ export default function MyProjectTab() {
               <div className="bg-bg/50 backdrop-blur-md rounded-xl p-5 border border-border/40">
                 <p className="text-[10px] font-bold text-ink-faint uppercase tracking-wider mb-1">Status</p>
                 <p className={`text-lg font-medium uppercase tracking-wider text-sm mt-1 ${
-                  (project?.status || 'active').toLowerCase() === 'active' ? 'text-accent' : 'text-red-500'
+                  (project?.status || 'active').toLowerCase() === 'active' ? 'text-accent' : 'text-danger'
                 }`}>
                   {project?.status || 'Active'}
                 </p>

@@ -519,6 +519,11 @@ export const warningDot          = 'w-1.5 h-1.5 rounded-full bg-warning';
  * ZoomAssessmentModal, and similar floating-overlay dialogs. */
 export const modalCloseButton    = 'w-7 h-7 flex items-center justify-center rounded-full text-ink-faint hover:text-ink hover:bg-black/5 transition-colors cursor-pointer';
 
+/* Notification-bell trigger button (icon-only round button with
+ * a notification badge anchor). Lighter-weight than modalCloseButton
+ * (no relative, smaller, uses /10 instead of /5 hover alpha). */
+export const notificationBellButton = 'hidden lg:flex w-9 h-9 items-center justify-center rounded-full hover:bg-black/5 transition-colors relative cursor-pointer';
+
 export const dangerBannerExtended   = 'rounded-2xl border border-danger/30 bg-danger-light p-6 text-sm text-danger';
 export const dangerPillLight        = 'px-4 py-2.5 rounded-lg text-xs font-medium border bg-danger-light text-danger border-danger/30';
 export const dangerHoverChipSubtle  = 'text-[10px] font-medium uppercase tracking-wider text-ink-soft bg-mist border border-border/60 rounded-md px-2 py-1 hover:bg-danger-light hover:text-danger hover:border-danger/30 disabled:opacity-40 transition-colors';
