@@ -64,6 +64,7 @@ import {
   resetAiUsage,
   getAiProviders,
   testProvider,
+  testFeature,
   revealApiKey,
   listProviderModels,
 } from '../ai/ai-config.controller.js';
@@ -144,6 +145,7 @@ router.post('/ai/config/reset-usage', resetAiUsage);
 router.get('/ai/providers', getAiProviders);
 router.get('/ai/providers/test', testProvider);
 router.get('/ai/providers/models', listProviderModels);
+router.post('/ai/test-feature', testFeature);
 
 // AI API call audit log (per-call observability for the model browser + every
 // chat/embedding request). Admin-only; surfaces as "AI API Logs" page.

@@ -731,6 +731,36 @@ export default function AdminAISettings() {
   const [savingProvider, setSavingProvider] = useState(false);
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ provider: string; ok: boolean; message: string } | null>(null);
+  // v1.82 — per-feature live test. `testingFeature` is the id of the
+  // feature whose test is in flight; `featureTestResults` keeps the
+  // outcome so the admin can see it next to the row even after
+  // editing other fields.
+  const [testingFeature, setTestingFeature] = useState<keyof AiConfig['features'] | null>(null);
+  const [featureTestResults, setFeatureTestResults] = useState<Record<string, { ok: boolean; preview: string; durationMs: number; content: string } | null>>({});
+  const onTestFeature = async (feature: keyof AiConfig['features']) => {
+    setTestingFeature(feature);
+    try {
+      const res = await adminApi.post<{ ok: boolean; feature: string; content: string; preview: string; durationMs: number; error?: string }>(
+        '/admin/ai/test-feature',
+        { feature, batchId: activeBatchId ?? null }
+      );
+      setFeatureTestResults(prev => ({ ...prev, [feature]: {
+        ok: !!res.data.ok,
+        preview: res.data.preview || res.data.error || '(no preview)',
+        durationMs: res.data.durationMs ?? 0,
+        content: res.data.content || '',
+      } }));
+    } catch (err: any) {
+      setFeatureTestResults(prev => ({ ...prev, [feature]: {
+        ok: false,
+        preview: err?.response?.data?.error || err?.message || 'Request failed',
+        durationMs: 0,
+        content: '',
+      } }));
+    } finally {
+      setTestingFeature(null);
+    }
+  };
   const [providerDrafts, setProviderDrafts] = useState<Record<ProviderKey, { apiKey: string; baseURL: string; model: string; customModelField: string; showKey: boolean; revealing: boolean }>>({
     anthropic: { apiKey: '', baseURL: '', model: '', customModelField: '', showKey: false, revealing: false },
     openai:    { apiKey: '', baseURL: '', model: '', customModelField: '', showKey: false, revealing: false },
@@ -1319,6 +1349,17 @@ export default function AdminAISettings() {
                       </p>
                     </div>
                     <Toggle checked={f.enabled} onChange={() => handleFeatureToggle(feature)} />
+                    <button
+                      type="button"
+                      onClick={() => onTestFeature(feature)}
+                      disabled={!f.enabled || testingFeature === feature}
+                      title={`Fire an actual ${feature} call against the current config (uses the active provider's key + base URL + customModelField). Lets you verify the whole pipeline without waiting for a cron tick.`}
+                      className={`${adminBtnSecondary} px-2 py-1 text-[10px] flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shrink-0`}
+                    >
+                      {testingFeature === feature
+                        ? <><span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />Testing…</>
+                        : '▶ Test'}
+                    </button>
                   </div>
                   <div className={`grid grid-cols-2 gap-3 ${f.enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
                     {/* Chat model row — picker is grouped by provider,
@@ -1409,6 +1450,23 @@ export default function AdminAISettings() {
                       />
                     </div>
                   </div>
+                  {/* v1.82 — live test result panel. Shows whatever the
+                      last call returned (or an error) below the row's
+                      inputs. Auto-clears on next test. */}
+                  {featureTestResults[feature] && (
+                    <div className={`mt-2 p-3 rounded-lg text-xs font-mono whitespace-pre-wrap break-words ${featureTestResults[feature]!.ok ? 'bg-success/10 border border-success/30 text-success' : 'bg-danger/10 border border-danger/30 text-danger'}`}>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="font-semibold">{featureTestResults[feature]!.ok ? '✓' : '✕'} {featureTestResults[feature]!.preview}</span>
+                        <span className="text-[10px] opacity-70">{featureTestResults[feature]!.durationMs}ms</span>
+                      </div>
+                      {featureTestResults[feature]!.content && (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-[10px] opacity-70">raw response</summary>
+                          <pre className="mt-1 text-[10px] max-h-48 overflow-y-auto">{featureTestResults[feature]!.content}</pre>
+                        </details>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

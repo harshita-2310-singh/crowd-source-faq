@@ -410,6 +410,110 @@ export const testProvider = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+// ─── POST /api/admin/ai/test-feature ─────────────────────────────────
+//
+// v1.82 — Per-feature live test. Fires an actual extraction /
+// duplicate-check / summarization / FAQ-generation call with a
+// built-in sample input, so admins can verify the *full*
+// per-feature config (model, temperature, maxTokens, provider key,
+// baseURL, customModelField) works end-to-end without waiting for a
+// cron tick or staging a real post.
+//
+// Each feature uses the same input the production code path consumes;
+// the response is the same shape the rest of the app would store.
+// Errors are returned as `{ ok:false, error }` so the UI can surface
+// them inline.
+export const testFeature = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const body = (req.body ?? {}) as { feature?: string };
+    const feature = body.feature;
+    const validFeatures = ['duplicateDetection', 'knowledgeExtraction', 'searchSummarization', 'faqGeneration'] as const;
+    if (!feature || !(validFeatures as readonly string[]).includes(feature)) {
+      res.status(400).json({ ok: false, error: `Unknown feature "${feature}". Expected one of: ${validFeatures.join(', ')}` });
+      return;
+    }
+
+    const t0 = Date.now();
+    const { AiClient } = await import('./ai-client.service.js');
+    const client = new AiClient();
+
+    if (feature === 'duplicateDetection') {
+      const result = await client.detectDuplicates({
+        userQuestion: 'How do I request an NOC certificate?',
+        candidates: [
+          { _id: 'sample-1', title: 'How to apply for an NOC', source: 'faq' },
+          { _id: 'sample-2', title: 'Team meeting schedule', source: 'community' },
+        ],
+      });
+      const arr = result as unknown as Array<{ _id: string; score: number; reason: string }>;
+      res.json({
+        ok: true,
+        feature,
+        content: JSON.stringify(result),
+        preview: arr.length > 0
+          ? `${arr.length} candidate(s); top score ${arr[0].score.toFixed(2)} — ${arr[0].reason}`
+          : 'no duplicates found',
+        durationMs: Date.now() - t0,
+      });
+      return;
+    }
+
+    if (feature === 'knowledgeExtraction') {
+      const result = await client.extractKnowledge({
+        source: 'transcript',
+        rawText: 'Q: How do I request an NOC certificate?\nA: Submit the NOC form on the student dashboard. Processing takes 3-5 business days.\nQ: Who signs the certificate?\nA: The program coordinator signs all NOC certificates.',
+        context: 'Live test sample',
+      });
+      res.json({
+        ok: true,
+        feature,
+        content: JSON.stringify(result),
+        preview: `${result.length} Q&A pair(s) extracted`,
+        durationMs: Date.now() - t0,
+      });
+      return;
+    }
+
+    if (feature === 'searchSummarization') {
+      const result = await client.summarize({
+        query: 'How do I request an NOC certificate?',
+        faqs: [
+          { question: 'How to apply for an NOC', answer: 'Submit the NOC form on the student dashboard.' },
+        ],
+      });
+      res.json({
+        ok: true,
+        feature,
+        content: result,
+        preview: result.slice(0, 200),
+        durationMs: Date.now() - t0,
+      });
+      return;
+    }
+
+    if (feature === 'faqGeneration') {
+      const result = await client.generateFAQ(
+        'How do I request an NOC certificate?',
+        'Multiple students asked about NOC procedures this week.',
+        'Administrative'
+      );
+      res.json({
+        ok: true,
+        feature,
+        content: JSON.stringify(result),
+        preview: `${result.question.slice(0, 80)} → ${result.category}`,
+        durationMs: Date.now() - t0,
+      });
+      return;
+    }
+
+    // Unreachable — guarded by the enum check above.
+    res.status(400).json({ ok: false, error: 'Unhandled feature' });
+  } catch (err: any) {
+    res.json({ ok: false, error: err?.message || String(err) });
+  }
+};
+
 // ─── GET /api/admin/ai/providers/models?provider=X[&kind=embedding] ─────────
 //
 // Live model browser for the AI Settings page. Fetches the list of
