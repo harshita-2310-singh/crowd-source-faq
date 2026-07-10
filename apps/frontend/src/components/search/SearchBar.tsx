@@ -11,6 +11,11 @@ interface Suggestion {
   category: string;
 }
 
+interface RewriteSuggestion {
+  original: string;
+  rewritten: string;
+}
+
 interface SearchBarProps {
   onResults: (results: SearchResult[] | null) => void;
   onLoading: (loading: boolean) => void;
@@ -48,10 +53,12 @@ const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(function Se
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const [rewriteSuggestion, setRewriteSuggestion] = useState<RewriteSuggestion | null>(null);
   const isControlled = value !== undefined;
   const query = isControlled ? (value ?? '') : internalQuery;
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rewriteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -96,6 +103,27 @@ const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(function Se
     }
   };
 
+  const fetchRewrite = async (q: string) => {
+    const trimmed = q.trim();
+    if (trimmed.length < 4) {
+      setRewriteSuggestion(null);
+      return;
+    }
+    try {
+      const res = await api.post<{ original: string; rewritten: string; changed: boolean }>(
+        '/search/rewrite-query',
+        { query: trimmed }
+      );
+      if (res.data.changed && res.data.rewritten.trim().toLowerCase() !== trimmed.toLowerCase()) {
+        setRewriteSuggestion({ original: trimmed, rewritten: res.data.rewritten.trim() });
+      } else {
+        setRewriteSuggestion(null);
+      }
+    } catch {
+      setRewriteSuggestion(null);
+    }
+  };
+
   // v2 — Suggestions stay live as the user types (250ms debounce). Search
   // results also stream live as the user types (300ms debounce) — but they
   // appear INSIDE the glassmorphic dropdown bubble on the host page, not as
@@ -124,12 +152,32 @@ const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(function Se
       onResults(null);
       onError?.(null);
     }
+
+    if (rewriteDebounceRef.current) clearTimeout(rewriteDebounceRef.current);
+    if (val.trim().length >= 4) {
+      rewriteDebounceRef.current = setTimeout(() => fetchRewrite(val), 500);
+    } else {
+      setRewriteSuggestion(null);
+    }
   };
 
   const runSearchNow = () => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     setShowSuggestions(false);
     handleSearch(query);
+  };
+
+  const handleAcceptRewrite = () => {
+    if (!rewriteSuggestion) return;
+    const newQuery = rewriteSuggestion.rewritten;
+    setRewriteSuggestion(null);
+    if (isControlled) {
+      onQueryChange?.(newQuery);
+    } else {
+      setInternalQuery(newQuery);
+    }
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    handleSearch(newQuery);
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -229,6 +277,22 @@ const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(function Se
         {suggestionError && (
           <div className="absolute top-full left-0 right-0 mt-2 px-4 py-2 bg-danger-light border border-danger/20 rounded-xl text-xs text-danger">
             {suggestionError}
+          </div>
+        )}
+
+        {rewriteSuggestion && (
+          <div className="absolute bottom-full left-0 right-0 mb-2 px-4 py-2.5 bg-accent-light border border-accent/20 rounded-xl text-xs text-ink flex items-center gap-2 shadow-subtle z-50">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent shrink-0">
+              <path d="M12 3v3m0 12v3m9-9h-3M6 12H3m14.66-6.66l-2.12 2.12M8.46 15.54l-2.12 2.12m0-11.32l2.12 2.12m9.08 9.08l-2.12-2.12" />
+            </svg>
+            <span className="text-ink-soft">Did you mean:</span>
+            <button
+              type="button"
+              onMouseDown={handleAcceptRewrite}
+              className="font-semibold text-accent hover:text-accent-dark transition-colors"
+            >
+              "{rewriteSuggestion.rewritten}"
+            </button>
           </div>
         )}
       </div>
