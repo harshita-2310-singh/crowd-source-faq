@@ -85,8 +85,11 @@ describe('adminResetUserPassword', () => {
     // The findById mock returns a fresh spread of the doc on each
     // call (so role mutations on the returned object don't leak
     // into the next test). The factory set this up; re-assert after
-    // clearAllMocks nuked it.
-    vi.mocked(User.findById).mockImplementation(async () => ({ ...mockUserDoc }));
+    // clearAllMocks nuked it. Mongoose's findById returns a Query
+    // chain, not a Promise, so we cast through unknown to bypass
+    // the type — at runtime the mock returns our plain object.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(User.findById as any).mockImplementation(async () => ({ ...mockUserDoc }));
   });
 
   it('returns 403 when caller is not admin', async () => {
@@ -99,7 +102,7 @@ describe('adminResetUserPassword', () => {
   });
 
   it('returns 404 when target user does not exist', async () => {
-    vi.mocked(User.findById).mockResolvedValue(null as never);
+    vi.mocked(User.findById as any).mockResolvedValue(null as never);
     const res = mockRes();
     await adminResetUserPassword(adminReq() as never, res as never);
     expect(res.status).toHaveBeenCalledWith(404);
@@ -108,7 +111,7 @@ describe('adminResetUserPassword', () => {
   });
 
   it('returns 403 (and audits) when target user is an admin', async () => {
-    vi.mocked(User.findById).mockResolvedValue({ ...mockUserDoc, role: 'admin' });
+    vi.mocked(User.findById as any).mockResolvedValue({ ...mockUserDoc, role: 'admin' });
     const res = mockRes();
     await adminResetUserPassword(adminReq() as never, res as never);
     expect(res.status).toHaveBeenCalledWith(403);
@@ -118,7 +121,7 @@ describe('adminResetUserPassword', () => {
   });
 
   it('returns 400 when newPassword is missing', async () => {
-    vi.mocked(User.findById).mockResolvedValue({ ...mockUserDoc });
+    vi.mocked(User.findById as any).mockResolvedValue({ ...mockUserDoc });
     const req = adminReq({ body: {} });
     const res = mockRes();
     await adminResetUserPassword(req as never, res as never);
@@ -135,7 +138,7 @@ describe('adminResetUserPassword', () => {
     // mutated it. The shared `mockUserDoc` is unaffected — that's
     // intentional (the spread is the contract).
     let returned: typeof mockUserDoc | null = null;
-    vi.mocked(User.findById).mockImplementation(async () => {
+    vi.mocked(User.findById as any).mockImplementation(async () => {
       returned = { ...mockUserDoc };
       return returned as never;
     });
@@ -175,7 +178,7 @@ describe('adminResetUserPassword', () => {
 
   it('returns 500 when save throws', async () => {
     mockUserDoc.save = vi.fn(async () => { throw new Error('db down'); });
-    vi.mocked(User.findById).mockResolvedValue({ ...mockUserDoc });
+    vi.mocked(User.findById as any).mockResolvedValue({ ...mockUserDoc });
     const res = mockRes();
     await adminResetUserPassword(adminReq() as never, res as never);
     expect(res.status).toHaveBeenCalledWith(500);
