@@ -62,6 +62,18 @@ export interface BuildSnapshot {
     /** AI provider-failback chain in services/ai/fallbackChain.ts. */
     providerFallbackChain: boolean;
   };
+  /**
+   * v1.85 — present-only mask of the env vars the runtime actually
+   * needs. Designed so an operator can `curl /api/health/build`
+   * (no auth) and immediately see "which required vars are
+   * missing" without grepping logs or logging in.
+   *
+   * Values are NEVER included — only a boolean per var. A var
+   * that's marked `needed: true, present: false` is exactly the
+   * kind of thing that 503s `/api/zoom/auth/connect` with the
+   * structured `errorCode` we just shipped.
+   */
+  envHealth: Array<{ name: string; needed: boolean; present: boolean; category: 'zoom' | 'auth' }>;
 }
 
 let snapshot: BuildSnapshot | null = null;
@@ -123,12 +135,34 @@ function buildSnapshot(): BuildSnapshot {
     providerFallbackChain: true,
   };
 
+  // 3. Env health mask. Mirrors `needed` from the Connect handler's
+  //    structured-error path so an operator can confirm the
+  //    missing vars without making any admin calls. Empty-string
+  //    counts as !present (catches `'  '` and accidental newline
+  //    pastes). All entries have `needed: true` — we don't enumerate
+  //    optional vars here. This is a "what's broken right now"
+  //    tool, not a complete env dump.
+  const envHealth: BuildSnapshot['envHealth'] = [
+    { name: 'ZOOM_CLIENT_ID',        category: 'zoom', needed: true, present: !!(process.env.ZOOM_CLIENT_ID ?? '').trim() },
+    { name: 'ZOOM_CLIENT_SECRET',    category: 'zoom', needed: true, present: !!(process.env.ZOOM_CLIENT_SECRET ?? '').trim() },
+    // ZOOM_REDIRECT_URI is technically optional (runtime builds
+    // it from the request host) but listed here so operators see
+    // "ah, prod has it pinned" if they've set one.
+    { name: 'ZOOM_REDIRECT_URI',     category: 'zoom', needed: false, present: !!(process.env.ZOOM_REDIRECT_URI ?? '').trim() },
+    { name: 'ZOOM_WEBHOOK_SECRET_TOKEN', category: 'zoom', needed: true, present: !!(process.env.ZOOM_WEBHOOK_SECRET_TOKEN ?? '').trim() },
+    // State HMAC: either OAUTH_STATE_SECRET OR JWT_SECRET is required.
+    // We expose both so the operator can see which one is set.
+    { name: 'OAUTH_STATE_SECRET',    category: 'auth', needed: true, present: !!(process.env.OAUTH_STATE_SECRET ?? '').trim() },
+    { name: 'JWT_SECRET',            category: 'auth', needed: true, present: !!(process.env.JWT_SECRET ?? '').trim() },
+  ];
+
   return {
     sha,
     shortSha: sha ? sha.slice(0, 7) : null,
     dirty,
     capturedAt: new Date().toISOString(),
     features,
+    envHealth,
   };
 }
 

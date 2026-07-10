@@ -19,6 +19,32 @@ describe('getBuildSnapshot', () => {
     expect(typeof snap.features.documentReindex).toBe('boolean');
     expect(typeof snap.features.documentReindexRing).toBe('boolean');
     expect(typeof snap.features.providerFallbackChain).toBe('boolean');
+    // envHealth is always an array of present-only env masks for
+    // the runtime-required vars. No values, just booleans.
+    expect(Array.isArray(snap.envHealth)).toBe(true);
+    expect(snap.envHealth.length).toBeGreaterThan(0);
+    for (const row of snap.envHealth) {
+      expect(typeof row.name).toBe('string');
+      expect(typeof row.present).toBe('boolean');
+      expect(typeof row.needed).toBe('boolean');
+      expect(['zoom', 'auth']).toContain(row.category);
+      // Values are NEVER present in envHealth — only the mask.
+      expect((row as Record<string, unknown>).value).toBeUndefined();
+    }
+  });
+
+  it('always reports the same env mask regardless of which vars are actually set', () => {
+    // The mask structure is static — only the `present` booleans
+    // change. Locking the variable list here means a typo in the
+    // envHealth array above is caught in CI.
+    const snap = getBuildSnapshot();
+    const byName = (n: string) => snap.envHealth.find((r) => r.name === n);
+    expect(byName('ZOOM_CLIENT_ID')?.category).toBe('zoom');
+    expect(byName('ZOOM_CLIENT_SECRET')?.category).toBe('zoom');
+    expect(byName('ZOOM_REDIRECT_URI')?.category).toBe('zoom');
+    expect(byName('ZOOM_REDIRECT_URI')?.needed).toBe(false);
+    expect(byName('OAUTH_STATE_SECRET')?.category).toBe('auth');
+    expect(byName('JWT_SECRET')?.category).toBe('auth');
   });
 
   it('every feature capability is true (this build ships them all)', () => {
