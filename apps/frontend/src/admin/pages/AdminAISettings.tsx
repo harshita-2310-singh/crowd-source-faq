@@ -109,14 +109,15 @@ const PROVIDER_META = {
     defaultModel: 'MiniMax-M3',
     defaultBaseURL: 'https://api.minimax.io/v1',
     docsUrl: 'https://platform.minimax.io/user-center/basic-information/interface-key',
-    // v1.80 — hint about the two minimax key formats. Coding Plan
-    // keys (sk-cp-…) are only valid against the Coding Plan
-    // endpoints, NOT the general /v1/models or /chat/completions.
-    // Using one against the general endpoint returns the
-    // `1004 login fail` 401 even though the key is "valid" in the
-    // dashboard. General API keys look like sk-… (no -cp-
-    // segment) and live under Account Management → API Keys.
-    keyHint: 'Use a General API key (sk-…), not a Coding Plan key (sk-cp-…). Get it at the link above.',
+    // Both General API keys (sk-…) and Token Plan / Coding Plan keys
+    // (sk-cp-…) authenticate against the same base URL — they share
+    // the /v1/chat/completions endpoint. The only difference is the
+    // billing pool: General keys draw from pay-as-you-go credits, Token
+    // Plan keys draw from your subscription quota. If you have a Token
+    // Plan subscription, use the sk-cp-… key (Subscription Key from
+    // Billing → Token Plan). Otherwise use a general sk-… key from
+    // Account Management → API Keys.
+    keyHint: 'Use a General API key (sk-…) or Token Plan key (sk-cp-…). Both work against this endpoint; pick the one that matches your billing plan. Get it at the link above.',
     badgeColor: 'bg-accent/10 text-accent border-accent/20',
     suggestedModels: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2', 'MiniMax-Text-01']
   },
