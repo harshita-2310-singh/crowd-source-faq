@@ -44,6 +44,21 @@ export function useNavItems() {
       });
   }
 
+  // "My Questions" pill — only for logged-in, non-admin users
+  if (user && user.role !== 'admin') {
+    const communityIdx = allNavItems.findIndex(item => item.to === '/community');
+    const myQuestionsItem: NavItem = { label: 'My Questions', to: '/my-questions' };
+    if (communityIdx !== -1) {
+      allNavItems = [
+        ...allNavItems.slice(0, communityIdx + 1),
+        myQuestionsItem,
+        ...allNavItems.slice(communityIdx + 1),
+      ];
+    } else {
+      allNavItems = [...allNavItems, myQuestionsItem];
+    }
+  }
+
   return allNavItems;
 }
 

@@ -32,6 +32,7 @@ const AccountPage = lazy(() => import('../pages/AccountPage'));
 const HomePage = lazy(() => import('../pages/HomePage'));
 const FAQPage = lazy(() => import('../pages/FAQPage'));
 const CommunityPage = lazy(() => import('../pages/CommunityPage'));
+const MyQuestionsPage = lazy(() => import('../pages/MyQuestionsPage'));
 const SavedKnowledgePage = lazy(() => import('../pages/SavedKnowledgePage'));
 const SupportIndexPage = lazy(() => import('../pages/SupportIndexPage'));
 const NewSupportRequestPage = lazy(() => import('../pages/NewSupportRequestPage'));
@@ -150,6 +151,10 @@ export default function AppRoutes() {
             <Route path="/faq" element={<RouteElement name="faq"><FAQPage /></RouteElement>} />
             <Route path="/faq/:id" element={<RouteElement name="faq-:id"><FAQPage /></RouteElement>} />
             <Route path="/community" element={<RouteElement name="community"><CommunityPage /></RouteElement>} />
+            <Route
+              path="/my-questions"
+              element={<RouteElement name="my-questions"><AccountRoute><MyQuestionsPage /></AccountRoute></RouteElement>}
+            />
             <Route path="/saved" element={<RouteElement name="saved"><SavedKnowledgePage /></RouteElement>} />
             <Route path="/support" element={<RouteElement name="support"><SupportRoute /></RouteElement>} />
             <Route path="/support/new" element={<RouteElement name="support-new"><SupportNewRoute /></RouteElement>} />
