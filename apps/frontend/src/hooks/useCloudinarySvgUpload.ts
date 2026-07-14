@@ -20,6 +20,7 @@ import api from '../utils/api';
 export interface CloudinarySvgAsset {
   url: string; // Cloudinary secure_url
   publicId: string; // Cloudinary public_id
+  pageCount?: number; // Cloudinary pages count
 }
 
 interface CloudinarySvgSignResponse {
@@ -34,17 +35,18 @@ interface CloudinarySvgSignResponse {
 const ALLOWED_MIME = 'image/svg+xml';
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB — SVG flowcharts can be large
 
-export function useCloudinarySvgUpload() {
+export function useCloudinarySvgUpload(allowedMimes: string[] = ['image/svg+xml']) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(0);
 
   const upload = useCallback(async (file: File): Promise<CloudinarySvgAsset> => {
-    if (file.type !== ALLOWED_MIME) {
-      throw new Error('Only SVG files are allowed.');
+    if (!allowedMimes.includes(file.type)) {
+      throw new Error(`Only ${allowedMimes.map(m => m.split('/')[1].toUpperCase()).join(', ')} files are allowed.`);
     }
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      throw new Error(`SVG too large (max ${Math.round(MAX_FILE_SIZE_BYTES / 1024 / 1024)}MB).`);
+    const maxBytes = file.type === 'application/pdf' ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      throw new Error(`File too large (max ${Math.round(maxBytes / 1024 / 1024)}MB).`);
     }
 
     const token = ++inFlight.current;
@@ -53,11 +55,12 @@ export function useCloudinarySvgUpload() {
 
     try {
       // 1. Get signed upload params from our backend.
+      const subfolder = file.type === 'application/pdf' ? 'onboarding-pdfs' : 'onboarding-svgs';
       const { data: sign } = await api.get<CloudinarySvgSignResponse>(
-        '/upload/sign/cloudinary/svg'
+        `/upload/sign/cloudinary/svg?subfolder=${subfolder}`
       );
 
-      // 2. POST the SVG directly to Cloudinary.
+      // 2. POST the file directly to Cloudinary.
       const form = new FormData();
       form.append('file', file);
       form.append('api_key', sign.apiKey);
@@ -78,6 +81,7 @@ export function useCloudinarySvgUpload() {
       const cloud = (await cloudRes.json()) as {
         secure_url: string;
         public_id: string;
+        pages?: number;
       };
 
       if (token !== inFlight.current) {
@@ -87,6 +91,7 @@ export function useCloudinarySvgUpload() {
       return {
         url: cloud.secure_url,
         publicId: cloud.public_id,
+        pageCount: cloud.pages,
       };
     } catch (e) {
       const msg = (e as Error).message;
@@ -97,7 +102,7 @@ export function useCloudinarySvgUpload() {
         setUploading(false);
       }
     }
-  }, []);
+  }, [allowedMimes]);
 
   return { upload, uploading, error };
 }

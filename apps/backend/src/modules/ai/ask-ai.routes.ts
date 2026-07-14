@@ -118,8 +118,20 @@ router.get(
   authorize('admin', 'ai_moderator'),
   async (req: Request, res: Response) => {
     try {
+      // S5-M1 (MEDIUM) fix: previously any admin from any program
+      // could preview any post — exposing raw post content + persisted
+      // aiContext across programs. Now: if the post has a batchId
+      // AND the calling admin's `adminPrograms` includes it, allow;
+      // otherwise 404 (do not leak existence).
       const post = await CommunityPost.findById(req.params.postId).lean();
       if (!post) {
+        return res.status(404).json({ message: 'Post not found' });
+      }
+      const postBatchId = (post.batchId as { toString(): string } | undefined)?.toString() ?? null;
+      const userPrograms: string[] = ((req as any).user?.adminPrograms ?? []) as string[];
+      const isGlobalAdmin = userPrograms.length === 0 && (req as any).user?.role === 'admin';
+      if (postBatchId && !isGlobalAdmin && !userPrograms.includes(postBatchId)) {
+        adminLog.warn(`[previewContext] post=${req.params.postId} outside admin's programs — denied`);
         return res.status(404).json({ message: 'Post not found' });
       }
       const queryText = `${post.title ?? ''} ${post.body ?? ''}`.trim();
@@ -129,8 +141,7 @@ router.get(
         req.query.includeComments === undefined
           ? true
           : req.query.includeComments !== 'false';
-      const batchId =
-        (post.batchId as { toString(): string } | undefined)?.toString() ?? null;
+      const batchId = postBatchId;
 
       adminLog.info(
         `[previewContext] post=${req.params.postId} batch=${batchId} queryLen=${queryText.length}`,

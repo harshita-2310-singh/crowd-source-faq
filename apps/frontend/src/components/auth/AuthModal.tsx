@@ -6,6 +6,34 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import api from '../../utils/api';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
+import {
+  authCloseButton,
+  authHintFaint,
+  authHintSoft,
+  authInfoBox,
+  authInputIcon,
+  authModalPanel,
+  authTabBase,
+  authTabActive,
+  authTabIdle,
+  authTabRow,
+  authTitle,
+  accentBorderMuted,
+  cardHeaderTitle,
+  dangerBorder,
+  emptyPaddedCenter,
+  inlineDangerBanner,
+  modalShell,
+  modalTitleRow,
+  stackMd,
+  textBody,
+  textHeaderSm,
+  textLabel,
+  textLabelBold,
+  textXsFaint,
+  warningBorder,
+  textXsLabel,
+} from '../../styles/style_config';
 
 type Tab = 'signin' | 'register';
 
@@ -264,7 +292,7 @@ export default function AuthModal() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center px-4 animate-fade-in"
+      className={modalShell}
       style={{
         backgroundColor: 'rgba(15, 15, 15, 0.45)',
         backdropFilter: 'blur(14px) saturate(1.4)',
@@ -278,23 +306,23 @@ export default function AuthModal() {
       aria-labelledby="auth-modal-title"
     >
       <div
-        className="w-full max-w-sm bg-card rounded-2xl border border-border shadow-card p-6 animate-fade-in"
+        className={authModalPanel}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between mb-5">
+        <div className={modalTitleRow}>
           <div>
-            <h2 id="auth-modal-title" className="text-base font-serif text-ink">
+            <h2 id="auth-modal-title" className={authTitle}>
               {tab === 'signin' ? 'Sign in' : 'Get started'}
             </h2>
             {prompt && (
-              <p className="text-[11px] text-ink-soft mt-1">{prompt}</p>
+              <p className={authHintSoft}>{prompt}</p>
             )}
           </div>
           <button
             onClick={handleClose}
             aria-label="Close"
-            className="w-7 h-7 flex items-center justify-center rounded-full text-ink-faint hover:text-ink hover:bg-black/[0.04] transition-colors -mt-1 -mr-1"
+            className={authCloseButton}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
               <line x1="6" y1="6" x2="18" y2="18"/>
@@ -304,27 +332,23 @@ export default function AuthModal() {
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 p-1 rounded-full bg-mist mb-5">
+        <div className={authTabRow}>
           <button
             onClick={() => { setTab('signin'); setError(''); }}
-            className={`flex-1 py-1.5 text-xs font-semibold rounded-full transition-colors ${
-              tab === 'signin' ? 'bg-card text-ink shadow-subtle' : 'text-ink-soft hover:text-ink'
-            }`}
+            className={`${authTabBase} ${tab === 'signin' ? authTabActive : authTabIdle}`}
           >
             Sign in
           </button>
           <button
             onClick={() => { setTab('register'); setError(''); }}
-            className={`flex-1 py-1.5 text-xs font-semibold rounded-full transition-colors ${
-              tab === 'register' ? 'bg-card text-ink shadow-subtle' : 'text-ink-soft hover:text-ink'
-            }`}
+            className={`${authTabBase} ${tab === 'register' ? authTabActive : authTabIdle}`}
           >
             Get started
           </button>
         </div>
 
         {tab === 'signin' ? (
-          <form onSubmit={handleLoginSubmit} className="space-y-4" noValidate>
+          <form onSubmit={handleLoginSubmit} className={stackMd} noValidate>
             <Input
               id="modal-login-email"
               name="email"
@@ -350,7 +374,7 @@ export default function AuthModal() {
                 <button
                   type="button"
                   onClick={() => setShowLoginPwd(!showLoginPwd)}
-                  className="pointer-events-auto p-1 hover:text-ink transition-colors flex items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/25"
+                  className={authInputIcon}
                   aria-label={showLoginPwd ? "Hide password" : "Show password"}
                 >
                   {showLoginPwd ? (
@@ -362,7 +386,7 @@ export default function AuthModal() {
               }
             />
             {error && (
-              <p className="text-xs text-danger bg-danger-light border border-danger/15 rounded-xl px-3 py-2">
+              <p className={inlineDangerBanner}>
                 {error}
               </p>
             )}
@@ -371,7 +395,7 @@ export default function AuthModal() {
             </Button>
           </form>
         ) : (
-          <form onSubmit={handleRegisterSubmit} className="space-y-4" noValidate>
+          <form onSubmit={handleRegisterSubmit} className={stackMd} noValidate>
             {/* v1.7x — Registration-mode banner. Drives both the copy
                 and whether the submit button is enabled. The banner is
                 intentionally rendered above the inputs so a closed-mode
@@ -379,16 +403,15 @@ export default function AuthModal() {
                 a form that would 403. */}
             {regStatus && (
               <div
-                className={[
-                  'rounded-md px-3 py-2 text-[11px] border',
+                className={
                   !regStatus.enabled
-                    ? 'bg-red-50 border-red-200 text-red-900'
+                    ? dangerBorder
                     : regStatus.openForAll
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                      ? accentBorderMuted
                       : inviteToken
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                        : 'bg-amber-50 border-amber-200 text-amber-900',
-                ].join(' ')}
+                        ? accentBorderMuted
+                        : warningBorder
+                }
                 aria-live="polite"
               >
                 {!regStatus.enabled ? (
@@ -451,7 +474,7 @@ export default function AuthModal() {
                 <button
                   type="button"
                   onClick={() => setShowRegPwd(!showRegPwd)}
-                  className="pointer-events-auto p-1 hover:text-ink transition-colors flex items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/25"
+                  className={authInputIcon}
                   aria-label={showRegPwd ? "Hide password" : "Show password"}
                 >
                   {showRegPwd ? (
@@ -462,7 +485,7 @@ export default function AuthModal() {
                 </button>
               }
             />
-            <p className="text-[10px] text-ink-faint -mt-2">At least 8 characters, including a letter and a number</p>
+            <p className={authHintFaint}>At least 8 characters, including a letter and a number</p>
             <Input
               id="modal-register-confirm"
               name="confirmPassword"
@@ -477,7 +500,7 @@ export default function AuthModal() {
                 <button
                   type="button"
                   onClick={() => setShowRegConfirmPwd(!showRegConfirmPwd)}
-                  className="pointer-events-auto p-1 hover:text-ink transition-colors flex items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/25"
+                  className={authInputIcon}
                   aria-label={showRegConfirmPwd ? "Hide password" : "Show password"}
                 >
                   {showRegConfirmPwd ? (
@@ -489,7 +512,7 @@ export default function AuthModal() {
               }
             />
             {error && (
-              <p className="text-xs text-danger bg-danger-light border border-danger/15 rounded-xl px-3 py-2">
+              <p className={inlineDangerBanner}>
                 {error}
               </p>
             )}
@@ -509,7 +532,7 @@ export default function AuthModal() {
             >
               {regStatusLoading ? 'Loading…' : 'Create account'}
             </Button>
-            <div className="mt-3 rounded-xl border border-border bg-mist px-3 py-2.5 text-center text-[11px] text-ink-soft">
+            <div className={authInfoBox}>
               If you are Unable to Register, please ensure that you have joined the whatsapp group sent to you via mail
             </div>
           </form>

@@ -6,7 +6,8 @@
  * (button click or empty submit), the form collapses without calling
  * `onConfirm`.
  */
-import { useState } from 'react';
+import { useState } from 'react'
+import { adminBtnGhost, adminBtnPrimary } from '../../../styles/style_config';
 
 export interface InlinePromptProps {
   /** Text shown on the trigger button (e.g. "Reject"). */
@@ -101,14 +102,14 @@ export default function InlinePrompt({
       <div className="flex gap-2 justify-end">
         <button
           type="button"
-          className="admin-btn admin-btn-ghost text-xs"
+          className={`${adminBtnGhost} text-xs`}
           onClick={handleCancel}
         >
           Cancel
         </button>
         <button
           type="button"
-          className="admin-btn admin-btn-primary text-xs"
+          className={`${adminBtnPrimary} text-xs`}
           onClick={handleConfirm}
           disabled={!value.trim()}
         >

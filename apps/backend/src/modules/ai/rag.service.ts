@@ -41,7 +41,7 @@ export interface RagResult {
   answer: string;
   sources: RagSource[];
   /** The model that produced the answer (e.g. "gpt-4o-mini"). */
-  model: string;
+  modelName: string;
 }
 
 const TOP_K_PER_SOURCE = 4;
@@ -307,7 +307,7 @@ export async function runRag(question: string, attachments: RagAttachment[] = []
     return {
       answer: "I couldn't find anything relevant in the FAQ, community, or your team's Zoom knowledge base. Try rephrasing, or post a new question to the community.",
       sources: [],
-      model: 'none',
+      modelName: 'none',
     };
   }
 
@@ -337,14 +337,14 @@ export async function runRag(question: string, attachments: RagAttachment[] = []
     const cfg = await resolveProviderAsync();
     const t1 = Date.now();
     answer = await chatCompletion(cfg, prompt + attachmentNote + textAttachments, imageAttachments);
-    model = cfg.model;
-    logger.info('rag.completion.done', { ms: Date.now() - t1, model: cfg.model, sources: sources.length, attachments: attachments.length });
+    model = cfg.modelName;
+    logger.info('rag.completion.done', { ms: Date.now() - t1, modelName: cfg.modelName, sources: sources.length, attachments: attachments.length });
   } catch (llmErr) {
     logger.warn('rag.completion.failed', { error: (llmErr as Error).message });
     answer = sources[0]?.snippet ?? '';
   }
 
-  return { answer, sources, model };
+  return { answer, sources, modelName: model };
 }
 
 /**
@@ -357,7 +357,7 @@ export async function runRag(question: string, attachments: RagAttachment[] = []
  * OpenAI-compatible uses `{type:'image_url', image_url:{url:'data:...'}}`.
  */
 async function chatCompletion(
-  cfg: { apiKey: string; baseURL: string; model: string; provider: string; needsAnthropicVersion: boolean; authHeader: 'x-api-key' | 'Authorization' },
+  cfg: { apiKey: string; baseURL: string; modelName: string; provider: string; needsAnthropicVersion: boolean; authHeader: 'x-api-key' | 'Authorization' },
   prompt: string,
   images: RagAttachment[] = []
 ): Promise<string> {
@@ -397,7 +397,7 @@ async function chatCompletion(
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: cfg.model,
+        model: cfg.modelName,
         messages: [{ role: 'user', content: buildContent() }],
         max_tokens: 800,
       }),
@@ -411,7 +411,7 @@ async function chatCompletion(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: cfg.model,
+      model: cfg.modelName,
       messages: [{ role: 'user', content: buildContent() }],
       max_tokens: 800,
       temperature: 0.2,

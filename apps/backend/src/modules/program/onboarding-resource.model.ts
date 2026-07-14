@@ -99,6 +99,9 @@ export interface IOnboardingResource extends Document {
   /** Free-form tags; useful for filtering. */
   tags: string[];
 
+  /** For PDF/PPTX/SVG: number of pages or slides. */
+  pageCount?: number | null;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -123,6 +126,7 @@ const onboardingResourceSchema = new MongooseSchema<IOnboardingResource>(
     order: { type: Number, default: 0, index: true },
     visible: { type: Boolean, default: true, index: true },
     tags: { type: [String], default: [] },
+    pageCount: { type: Number, default: null },
   },
   { timestamps: true }
 );

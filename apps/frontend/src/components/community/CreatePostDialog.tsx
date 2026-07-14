@@ -9,6 +9,12 @@ import { useGcsUpload, type GcsAsset } from '../../hooks/useGcsUpload';
 import { buildGcsTransformedUrl } from '../../utils/gcsTransform';
 import { useBatch } from '../../context/BatchContext';
 import { useCategories } from '../explore/usePublicFaqApi';
+import {
+  communityTemplateCard,
+  communityTemplateLabel,
+  communityTemplateIcon,
+  communityToastWarn,
+} from '../../styles/style_config';
 
 function CategoryDropdown({
   value,
@@ -166,6 +172,14 @@ export default function CreatePostDialog({ onClose, onCreated, prefillTitle = ''
     return '';
   });
   const [loading, setLoading] = useState(false);
+  // Synchronous re-entry guard. The button's `disabled` prop already
+  // prevents the second click once React re-renders, but between the
+  // first click and the next render there's a small window where a fast
+  // double-click (or a screen-reader user hitting Enter twice) gets
+  // through. The ref updates synchronously, so the second call returns
+  // immediately without firing a duplicate POST. Reset in the finally
+  // block so the dialog can be reopened for a different post.
+  const submittingRef = useRef(false);
   const [error, setError] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [categoryOption, setCategoryOption] = useState<string>('');
@@ -243,6 +257,8 @@ export default function CreatePostDialog({ onClose, onCreated, prefillTitle = ''
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setError('');
     if (!title.trim() || !body.trim()) {
       setError('Both title and description are required.');
@@ -263,22 +279,34 @@ export default function CreatePostDialog({ onClose, onCreated, prefillTitle = ''
     }
     setLoading(true);
     try {
-      const res = await api.post<{ post: Post }>('/community', {
-        title: title.trim(),
-        body: body.trim(),
-        tags,
-        // Send only the persisted fields the backend expects. The full
-        // Cloudinary response has more (eager, etc.) that we don't save.
-        attachments: attachments.map((a) => ({
-          url: a.url,
-          gcsUri: a.gcsUri,
-          objectPath: a.objectPath,
-          width: a.width,
-          height: a.height,
-          format: a.format,
-          bytes: a.bytes,
-        })),
-      });
+      // Per-form-mount idempotency key. Combined with the in-handler
+      // submittingRef guard, this catches (a) fast double-clicks within
+      // the React-render-lag window, and (b) network retries (mobile
+      // drop / VPN reconnect). The backend's `Idempotency-Key` header
+      // handler returns the same response for the same key within 60s.
+      // Random UUID per form mount — re-mounting the dialog gets a new
+      // key, which is what we want.
+      const idempotencyKey = crypto.randomUUID();
+      const res = await api.post<{ post: Post }>(
+        '/community',
+        {
+          title: title.trim(),
+          body: body.trim(),
+          tags,
+          // Send only the persisted fields the backend expects. The full
+          // Cloudinary response has more (eager, etc.) that we don't save.
+          attachments: attachments.map((a) => ({
+            url: a.url,
+            gcsUri: a.gcsUri,
+            objectPath: a.objectPath,
+            width: a.width,
+            height: a.height,
+            format: a.format,
+            bytes: a.bytes,
+          })),
+        },
+        { headers: { 'Idempotency-Key': idempotencyKey } },
+      );
       // Clear draft on success
       try { sessionStorage.removeItem(DRAFT_KEY); } catch { void 0 }
       // Show toast with duplicate check result
@@ -299,6 +327,7 @@ export default function CreatePostDialog({ onClose, onCreated, prefillTitle = ''
     } catch (err) {
       setError(friendlyError(err, 'Failed to post. Please try again.'));
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };
@@ -407,12 +436,12 @@ export default function CreatePostDialog({ onClose, onCreated, prefillTitle = ''
                         dialogRef.current?.close();
                         navigate(href);
                       }}
-                      className="w-full text-left flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-card/70 hover:bg-card border border-amber-200 hover:border-amber-400 hover:shadow-sm transition-all group cursor-pointer"
+                      className={communityTemplateCard}
                     >
                       <span className="shrink-0 mt-0.5">{icon}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">{label}</span>
+                          <span className={communityTemplateLabel}>{label}</span>
                           {m.score && (
                             <span className="text-[10px] text-ink-faint">{(m.score * 100).toFixed(0)}% match</span>
                           )}
@@ -421,7 +450,7 @@ export default function CreatePostDialog({ onClose, onCreated, prefillTitle = ''
                           "{m.question || m.title}"
                         </p>
                       </div>
-                      <svg className="shrink-0 mt-1 w-3 h-3 text-ink-faint group-hover:text-amber-600 group-hover:translate-x-0.5 transition-all" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg className={communityTemplateIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M9 18l6-6-6-6"/>
                       </svg>
                     </button>
@@ -545,9 +574,9 @@ export default function CreatePostDialog({ onClose, onCreated, prefillTitle = ''
 
           {toast && (
             <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] px-5 py-3 rounded-xl text-sm font-medium shadow-float border animate-fade-in
-              ${toast.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
-                toast.type === 'warn' ? 'bg-amber-50 border-amber-200 text-amber-700' :
-                'bg-blue-50 border-blue-200 text-blue-700'}`}>
+              ${toast.type === 'success' ? 'bg-accent/10 border-accent/30 text-accent' :
+                toast.type === 'warn' ? communityToastWarn :
+                'bg-accent/10 border-accent/30 text-accent'}`}>
               {toast.msg}
             </div>
           )}
