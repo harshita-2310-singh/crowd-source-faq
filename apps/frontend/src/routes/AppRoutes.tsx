@@ -32,6 +32,7 @@ const AccountPage = lazy(() => import('../pages/AccountPage'));
 const HomePage = lazy(() => import('../pages/HomePage'));
 const FAQPage = lazy(() => import('../pages/FAQPage'));
 const CommunityPage = lazy(() => import('../pages/CommunityPage'));
+const LeaderboardPage = lazy(() => import('../pages/LeaderboardPage'));
 const MyQuestionsPage = lazy(() => import('../pages/MyQuestionsPage'));
 const SavedKnowledgePage = lazy(() => import('../pages/SavedKnowledgePage'));
 const SupportIndexPage = lazy(() => import('../pages/SupportIndexPage'));
@@ -163,6 +164,7 @@ export default function AppRoutes() {
             <Route path="/explore/select" element={<RouteElement name="explore-select"><Navigate to="/programs" replace /></RouteElement>} />
             <Route path="/faq" element={<RouteElement name="faq"><FAQPage /></RouteElement>} />
             <Route path="/faq/:id" element={<RouteElement name="faq-:id"><FAQPage /></RouteElement>} />
+            <Route path="/leaderboard" element={<RouteElement name="leaderboard"><LeaderboardPage /></RouteElement>} />
             <Route path="/community" element={<RouteElement name="community"><CommunityPage /></RouteElement>} />
             <Route
               path="/my-questions"

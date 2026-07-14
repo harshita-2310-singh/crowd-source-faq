@@ -70,6 +70,25 @@ Eight flagship capabilities define this platform:
 
 Other capabilities: semantic hybrid search, community Q&A board, reputation system + badges + leaderboard, SpillTheTea event-driven notifications, per-user Zoom OAuth, RAG-powered `/ask-ai` assistant with image + file attachments, soft user lifecycle, experimental feature flags, support tickets (troubleshoot → admin triage → resolution).
 
+
+### Leaderboard
+
+Tracks community engagement through a ranked leaderboard, viewable at `/leaderboard`.
+
+**All-Time view** — ranks users by their total accumulated points (`User.points`), 
+sourced from existing reputation-earning actions (upvotes received, accepted answers).
+
+**Weekly view** — ranks users by points earned in the last 7 days only, calculated by 
+aggregating `ReputationLog` entries within that window. Resets naturally every week 
+since it's always a rolling 7-day calculation, not a stored value.
+
+**API endpoints:**
+- `GET /api/leaderboard/all-time` — returns top 20 users by all-time points
+- `GET /api/leaderboard/weekly` — returns top 20 users by points earned in the last 7 days
+
+No new database collections were introduced — this feature reads existing 
+`User` and `ReputationLog` data in new ways.
+
 ---
 
 ## Admin Dashboard
